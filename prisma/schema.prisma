@@ -1,0 +1,72 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model users {
+  user_index       Int             @id @default(autoincrement())
+  user_display     String
+  user_email       String
+  user_password    String
+  user_permission  UserPermission  @default(unverified)
+  user_restriction Boolean         @default(false)
+  hosts            hosts[]
+  refreshTokens    refresh_token[]
+}
+
+model refresh_token {
+  token_index      Int       @id @default(autoincrement())
+  token_owner      Int
+  token_created_at DateTime  @default(now())
+  token_expired_at DateTime?
+
+  owner users @relation(fields: [token_owner], references: [user_index])
+}
+
+/**
+ * Connection Code로 중앙 서버 클러스터와 연결이 성립된 서버
+ */
+model hosts {
+  host_index      Int        @id @default(autoincrement())
+  host_owner      Int
+  host_ip         String?
+  host_token      String
+  host_deleted_at DateTime
+  host_status     HostStatus @default(unlinked)
+  host_lastOnline DateTime?
+
+  owner users @relation(fields: [host_owner], references: [user_index])
+}
+
+/**
+ * 새 OPTCS 에이전트를 생성했을 때 연결 코드
+ */
+model connections {
+  connection_index       Int      @id @default(autoincrement())
+  connection_ip          String
+  connection_code        String
+  connection_timestamp   DateTime @default(now())
+  connection_established Boolean  @default(false)
+  connection_expired     Boolean  @default(false)
+}
+
+enum UserPermission {
+  unverified
+  verified
+  moderator
+}
+
+enum HostStatus {
+  unlinked
+  linked
+  offline
+}
