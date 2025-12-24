@@ -26,6 +26,7 @@ model users {
 model refresh_token {
   token_index      Int       @id @default(autoincrement())
   token_owner      Int
+  token            String
   token_created_at DateTime  @default(now())
   token_expired_at DateTime?
 

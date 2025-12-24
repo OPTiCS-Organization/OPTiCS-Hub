@@ -3,11 +3,14 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { JwtUtil } from './jwt.util';
+import { JwtUtil } from './util/jwt.util';
+import { PassportModule } from '@nestjs/passport';
+import { JwtStrategy } from './interceptor/strategy/jwt.strategy';
+import { JwtGuard } from './interceptor/guard/jwt.guard';
 
 @Module({
   imports: [
-    ConfigModule,
+    PassportModule.register({ defaultStrategy: 'jwt', session: false }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -16,11 +19,21 @@ import { JwtUtil } from './jwt.util';
       inject: [ConfigService],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [
+    AuthController,
+  ],
   providers: [
     AuthService,
     JwtUtil,
+    JwtStrategy,
+    JwtGuard,
   ],
-  exports: [AuthModule, JwtModule],
+  exports: [
+    AuthModule,
+    JwtModule,
+    JwtStrategy,
+    JwtGuard,
+    JwtUtil,
+  ],
 })
 export class AuthModule { }

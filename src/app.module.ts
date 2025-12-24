@@ -3,10 +3,21 @@ import { ServerController } from './server/server.controller';
 import { ServerService } from './server/server.service';
 import { ServerModule } from './server/server.module';
 import { AuthModule } from './auth/auth.module';
+import { APP_FILTER } from '@nestjs/core';
+import { HttpExceptionFilter, TokenRefreshFilter } from './global/Global.filter';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
-  imports: [ServerModule, AuthModule],
+  imports: [
+    ServerModule,
+    AuthModule,
+    ConfigModule.forRoot({ isGlobal: true }),
+  ],
   controllers: [ServerController],
-  providers: [ServerService],
+  providers: [
+    ServerService,
+    { provide: APP_FILTER, useClass: HttpExceptionFilter, },
+    { provide: APP_FILTER, useClass: TokenRefreshFilter, },
+  ],
 })
 export class AppModule { }

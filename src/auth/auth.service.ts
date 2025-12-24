@@ -1,8 +1,7 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { RegisterDTO } from './dto/register.dto';
 import { prisma } from 'src/util/prisma.util';
-import { Response } from 'express';
-import { JwtUtil } from './jwt.util';
+import { JwtUtil } from './util/jwt.util';
 import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDTO } from './dto/login.dto';
@@ -27,7 +26,15 @@ export class AuthService {
       }
     });
 
-    return await this.jwtUtil.sign(user.user_index);
+    const { accessToken, refreshToken } = await this.jwtUtil.sign(user.user_index);
+    await prisma.refresh_token.create({
+      data: {
+        token: refreshToken,
+        token_owner: user.user_index,
+      }
+    });
+
+    return { accessToken, refreshToken };
   }
 
   async login(dto: LoginDTO) {
@@ -41,6 +48,14 @@ export class AuthService {
       throw new ConflictException('일치하는 이메일과 패스워드를 찾지 못했습니다.');
     }
 
-    return await this.jwtUtil.sign(foundUser.user_index);
+    const { accessToken, refreshToken } = await this.jwtUtil.sign(foundUser.user_index);
+    await prisma.refresh_token.create({
+      data: {
+        token: refreshToken,
+        token_owner: foundUser.user_index,
+      }
+    });
+
+    return { accessToken, refreshToken };
   }
 }
