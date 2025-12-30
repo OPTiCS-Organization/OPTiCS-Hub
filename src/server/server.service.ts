@@ -2,17 +2,20 @@ import { Injectable } from '@nestjs/common';
 import ms from 'ms';
 import { generate } from 'random-words';
 import log from 'spectra-log';
-import { prisma } from 'src/util/prisma.util';
+import { PrismaService } from 'src/prisma.service';
 
 @Injectable()
 export class ServerService {
+  constructor(
+    private readonly prismaService: PrismaService,
+  ) { };
 
   handleHeartbeat(data) {
     log(data);
   }
 
   async handleInitializeServer(data, ip) {
-    const connection = await prisma.connections.findFirst({ where: { connection_ip: ip, connection_expired: false } });
+    const connection = await this.prismaService.connections.findFirst({ where: { connection_ip: ip, connection_expired: false } });
 
     if (connection) {
       const connectionTimestamp = new Date(connection.connection_timestamp).getTime();
@@ -22,7 +25,7 @@ export class ServerService {
       }
     }
 
-    const newConnection = await prisma.connections.create({
+    const newConnection = await this.prismaService.connections.create({
       data: {
         connection_ip: ip,
         connection_code: generate() + '-' + generate(),
@@ -33,6 +36,6 @@ export class ServerService {
   }
 
   async handleCreateHost() {
-    
+
   }
 }

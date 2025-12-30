@@ -1,14 +1,14 @@
 import { Injectable, UnauthorizedException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
-import log from "spectra-log";
-import { prisma } from "src/util/prisma.util";
+import { PrismaService } from "src/prisma.service";
 
 @Injectable()
 export class JwtUtil {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly prismaService: PrismaService,
   ) { };
 
   async sign(userIndex: number) {
@@ -18,16 +18,19 @@ export class JwtUtil {
   async refresh(token: string) {
     const userIndex = this.jwtService.decode(token).userIndex;
 
-    const exist = await prisma.refresh_token.findFirstOrThrow({
+    const exist = await this.prismaService.refresh_token.findFirstOrThrow({
       where: {
         token_owner: userIndex,
         token: token,
+        token_expired_at: null,
       }
     }).catch(() => {
-      throw new UnauthorizedException();
+      return null;
     })
 
-    await prisma.refresh_token.update({
+    if (!exist) return { accessToken: null, refreshToken: null };
+
+    await this.prismaService.refresh_token.update({
       where: {
         token_index: exist.token_index
       },
@@ -46,6 +49,13 @@ export class JwtUtil {
 
     const refreshToken = await this.jwtService.signAsync({ userIndex }, {
       expiresIn: this.configService.getOrThrow('SECURITY_REFRESH_EXPIRE_TIME'),
+    });
+
+    await this.prismaService.refresh_token.create({
+      data: {
+        token: refreshToken,
+        token_owner: userIndex,
+      }
     });
 
     return { accessToken, refreshToken };

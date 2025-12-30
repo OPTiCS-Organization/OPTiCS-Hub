@@ -1,24 +1,25 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { RegisterDTO } from './dto/register.dto';
-import { prisma } from 'src/util/prisma.util';
 import { JwtUtil } from './util/jwt.util';
 import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDTO } from './dto/login.dto';
+import { PrismaService } from 'src/prisma.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly jwtUtil: JwtUtil,
     private readonly configService: ConfigService,
+    private readonly prismaService: PrismaService,
   ) { };
 
   async register(dto: RegisterDTO) {
-    if (await prisma.users.findFirst({ where: { user_email: dto.email } })) {
+    if (await this.prismaService.users.findFirst({ where: { user_email: dto.email } })) {
       throw new ConflictException('이미 사용중인 이메일입니다.');
     }
 
-    const user = await prisma.users.create({
+    const user = await this.prismaService.users.create({
       data: {
         user_email: dto.email,
         user_display: dto.display,
@@ -26,19 +27,11 @@ export class AuthService {
       }
     });
 
-    const { accessToken, refreshToken } = await this.jwtUtil.sign(user.user_index);
-    await prisma.refresh_token.create({
-      data: {
-        token: refreshToken,
-        token_owner: user.user_index,
-      }
-    });
-
-    return { accessToken, refreshToken };
+    return await this.jwtUtil.sign(user.user_index);
   }
 
   async login(dto: LoginDTO) {
-    const foundUser = await prisma.users.findFirstOrThrow({
+    const foundUser = await this.prismaService.users.findFirstOrThrow({
       where: {
         user_email: dto.email
       },
@@ -48,14 +41,6 @@ export class AuthService {
       throw new ConflictException('일치하는 이메일과 패스워드를 찾지 못했습니다.');
     }
 
-    const { accessToken, refreshToken } = await this.jwtUtil.sign(foundUser.user_index);
-    await prisma.refresh_token.create({
-      data: {
-        token: refreshToken,
-        token_owner: foundUser.user_index,
-      }
-    });
-
-    return { accessToken, refreshToken };
+    return await this.jwtUtil.sign(foundUser.user_index);
   }
 }

@@ -1,4 +1,5 @@
 export interface GlobalResponse {
-  message: string | undefined | null,
-  data: any | undefined;
+  code?: string,
+  message?: string | undefined | null,
+  data?: any | undefined;
 }

@@ -4,6 +4,7 @@ import { RegisterDTO } from './dto/register.dto';
 import { LoginDTO } from './dto/login.dto';
 import { CookieInterceptor } from 'src/global/Cookie.intercepter';
 import { JwtGuard } from './interceptor/guard/jwt.guard';
+import log from 'spectra-log';
 
 @Controller('auth')
 export class AuthController {
@@ -26,6 +27,6 @@ export class AuthController {
   @Post('/test')
   @UseGuards(JwtGuard)
   async testAPI() {
-    return 'suka';
+    return 'not expired';
   }
 }
