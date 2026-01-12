@@ -19,7 +19,7 @@ model users {
   user_password    String
   user_permission  UserPermission  @default(unverified)
   user_restriction Boolean         @default(false)
-  hosts            hosts[]
+  containers       containers[]
   refreshTokens    refresh_token[]
 }
 
@@ -34,36 +34,38 @@ model refresh_token {
 }
 
 /**
- * Connection Code로 중앙 서버 클러스터와 연결이 성립된 서버
+ * Connection Code로 중앙 서버 컨테이너와 연결이 성립된 서버
  */
-model hosts {
-  host_index      Int        @id @default(autoincrement())
-  host_owner      Int
-  host_ip         String?
-  host_token      String
-  host_deleted_at DateTime
-  host_status     HostStatus @default(unlinked)
-  host_lastOnline DateTime?
+model containers {
+  container_index       Int        @id @default(autoincrement())
+  container_owner       Int
+  container_name        String
+  agent_token           String?
+  container_status      HostStatus @default(unlinked)
+  container_last_online DateTime?
+  container_created_at  DateTime   @default(now())
+  container_deleted_at  DateTime?
 
-  owner users @relation(fields: [host_owner], references: [user_index])
+  owner users @relation(fields: [container_owner], references: [user_index])
 }
 
 /**
- * 새 OPTCS 에이전트를 생성했을 때 연결 코드
+ * 새 OPTiCS 에이전트를 생성했을 때 연결 코드
  */
-model connections {
-  connection_index       Int      @id @default(autoincrement())
-  connection_ip          String
-  connection_code        String
-  connection_timestamp   DateTime @default(now())
-  connection_established Boolean  @default(false)
-  connection_expired     Boolean  @default(false)
+model agents {
+  agent_index       Int      @id @default(autoincrement())
+  agent_ip          String
+  agent_token       String
+  agent_established Boolean  @default(false)
+  agent_created_at  DateTime @default(now())
+  agent_deleted_at  DateTime?
 }
 
 enum UserPermission {
   unverified
   verified
   moderator
+  administrator
 }
 
 enum HostStatus {
