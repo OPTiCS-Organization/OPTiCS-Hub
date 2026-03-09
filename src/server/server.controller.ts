@@ -45,9 +45,21 @@ export class ServerController {
     return response;
   }
 
+  /**
+   * Todo 
+   * 이미 연결된 에이전트에 다시 연결할 수 없도록 처리하기
+   */
   @Post('/:containerIdx/connect')
   @UseGuards(JwtGuard)
   async handleConnectContainer(@Request() request: any, @Param('containerIdx') param: string, @Body() body: ConnectContainer) {
-    const data = await this.serverService.handleConnectContainer(request.user.userIndex, parseInt(param), body.targetAgentCode)
+    const data = await this.serverService.handleConnectContainer(request.user.userIndex, parseInt(param), body.targetAgentCode);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        data
+      },
+      message: 'Connected Successfully.',
+    };
+    return response;
   }
 }

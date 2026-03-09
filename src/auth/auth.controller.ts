@@ -1,32 +1,38 @@
-import { Body, Controller, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Post, UseInterceptors } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDTO } from './dto/register.dto';
 import { LoginDTO } from './dto/login.dto';
 import { CookieInterceptor } from 'src/global/Cookie.intercepter';
-import { JwtGuard } from './interceptor/guard/jwt.guard';
-import log from 'spectra-log';
+import { GlobalResponse } from 'src/global/GlobalResponse.dto';
+import { Code } from 'src/global/Code.enum';
 
 @Controller('auth')
 export class AuthController {
-  constructor (
-    private readonly authService: AuthService,
-  ) { };
-  
+  constructor(private readonly authService: AuthService) {}
+
   @Post('/register')
   @UseInterceptors(CookieInterceptor)
   async register(@Body() body: RegisterDTO) {
-    return await this.authService.register(body);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Register and Logged In Successfully.',
+    };
+
+    const tokens = await this.authService.login(body);
+    return { ...tokens, ...response }
   }
 
   @Post('/login')
   @UseInterceptors(CookieInterceptor)
   async login(@Body() body: LoginDTO) {
-    return await this.authService.login(body);     
-  }
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Logged In Successfully.',
+    };
 
-  @Post('/test')
-  @UseGuards(JwtGuard)
-  async testAPI() {
-    return 'not expired';
+    const tokens = await this.authService.login(body);
+    return { ...tokens, ...response }
   }
 }

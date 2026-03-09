@@ -12,10 +12,14 @@ export class AuthService {
     private readonly jwtUtil: JwtUtil,
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
-  ) { };
+  ) {}
 
   async register(dto: RegisterDTO) {
-    if (await this.prismaService.users.findFirst({ where: { user_email: dto.email } })) {
+    if (
+      await this.prismaService.users.findFirst({
+        where: { user_email: dto.email },
+      })
+    ) {
       throw new ConflictException('이미 사용중인 이메일입니다.');
     }
 
@@ -23,22 +27,30 @@ export class AuthService {
       data: {
         user_email: dto.email,
         user_display: dto.display,
-        user_password: await bcrypt.hash(dto.password, parseInt(this.configService.getOrThrow('SECURITY_SALT_ROUND')))
-      }
+        user_password: await bcrypt.hash(
+          dto.password,
+          parseInt(this.configService.getOrThrow('SECURITY_SALT_ROUND')),
+        ),
+      },
     });
 
     return await this.jwtUtil.sign(user.user_index);
   }
 
   async login(dto: LoginDTO) {
-    const foundUser = await this.prismaService.users.findFirstOrThrow({
+    const foundUser = await this.prismaService.users.findFirst({
       where: {
-        user_email: dto.email
+        user_email: dto.email,
       },
     });
 
-    if (!foundUser || !await bcrypt.compare(dto.password, foundUser.user_password)) {
-      throw new ConflictException('일치하는 이메일과 패스워드를 찾지 못했습니다.');
+    if (
+      !foundUser ||
+      !(await bcrypt.compare(dto.password, foundUser.user_password))
+    ) {
+      throw new ConflictException(
+        '일치하는 이메일과 패스워드를 찾지 못했습니다.',
+      );
     }
 
     return await this.jwtUtil.sign(foundUser.user_index);

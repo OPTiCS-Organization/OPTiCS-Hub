@@ -2,7 +2,6 @@ import { ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/com
 import { AuthGuard } from "@nestjs/passport";
 import { TokenExpiredError } from "jsonwebtoken";
 import { Observable } from "rxjs";
-import log from "spectra-log";
 import { TokenExpiredException } from "src/global/exception/TokenExpired.exception";
 
 @Injectable()
@@ -11,7 +10,6 @@ export class JwtGuard extends AuthGuard('jwt') {
     const request = context.switchToHttp().getRequest();
 
     if (info instanceof TokenExpiredError) {
-      log('Throwing Expired')
       throw new TokenExpiredException('Access Token Expired');
     }
 

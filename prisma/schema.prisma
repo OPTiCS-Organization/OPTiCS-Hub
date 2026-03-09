@@ -15,7 +15,7 @@ datasource db {
 model users {
   user_index       Int             @id @default(autoincrement())
   user_display     String
-  user_email       String
+  user_email       String          @unique
   user_password    String
   user_permission  UserPermission  @default(unverified)
   user_restriction Boolean         @default(false)
@@ -55,7 +55,7 @@ model containers {
 model agents {
   agent_index       Int      @id @default(autoincrement())
   agent_ip          String
-  agent_token       String
+  agent_token       String   @unique
   agent_established Boolean  @default(false)
   agent_created_at  DateTime @default(now())
   agent_deleted_at  DateTime?
