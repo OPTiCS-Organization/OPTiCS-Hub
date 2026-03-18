@@ -11,6 +11,7 @@ import { JwtUtil } from 'src/auth/util/jwt.util';
 import log from 'spectra-log';
 import { GlobalResponse } from './GlobalResponse.dto';
 import { Code } from './Code.enum';
+import { cookieOptions } from './cookie-options';
 
 @Catch(TokenExpiredException)
 export class TokenRefreshFilter implements ExceptionFilter {
@@ -43,34 +44,14 @@ export class TokenRefreshFilter implements ExceptionFilter {
   }
 
   setCookies(response: Response, accessToken: string, refreshToken: string) {
-    response.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure: process.env.RUNNING_MODE === 'PRODUCTION',
-      sameSite: 'strict',
-    });
-
-    response.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: process.env.RUNNING_MODE === 'PRODUCTION',
-      sameSite: 'strict',
-    });
-
+    response.cookie('accessToken', accessToken, cookieOptions());
+    response.cookie('refreshToken', refreshToken, cookieOptions());
     return response;
   }
 
   clearCookies(response: Response) {
-    response.clearCookie('accessToken', {
-      httpOnly: true,
-      secure: process.env.RUNNING_MODE === 'PRODUCTION',
-      sameSite: 'strict',
-    });
-
-    response.clearCookie('refreshToken', {
-      httpOnly: true,
-      secure: process.env.RUNNING_MODE === 'PRODUCTION',
-      sameSite: 'strict',
-    });
-
+    response.clearCookie('accessToken', cookieOptions());
+    response.clearCookie('refreshToken', cookieOptions());
     return response;
   }
 }
