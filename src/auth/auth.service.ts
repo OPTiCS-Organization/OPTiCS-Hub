@@ -1,5 +1,6 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { RegisterDTO } from './dto/register.dto';
+import { CheckEmailDTO } from './dto/check-email.dto';
 import { JwtUtil } from './util/jwt.util';
 import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
@@ -14,7 +15,18 @@ export class AuthService {
     private readonly prismaService: PrismaService,
   ) {}
 
+  async checkEmail(dto: CheckEmailDTO) {
+    const user = await this.prismaService.users.findFirst({
+      where: { user_email: dto.email },
+    });
+    return { exists: !!user };
+  }
+
   async register(dto: RegisterDTO) {
+    if (dto.password !== dto.passwordConfirm) {
+      throw new BadRequestException('비밀번호가 일치하지 않습니다.');
+    }
+
     if (
       await this.prismaService.users.findFirst({
         where: { user_email: dto.email },

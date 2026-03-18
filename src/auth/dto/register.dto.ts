@@ -4,12 +4,17 @@ export class RegisterDTO {
   @IsNotEmpty()
   @IsEmail()
   email: string;
-  
+
   @IsNotEmpty()
   @IsString()
   @Length(8, 255)
   password: string;
-  
+
+  @IsNotEmpty()
+  @IsString()
+  @Length(8, 255)
+  passwordConfirm: string;
+
   @IsNotEmpty()
   @IsString()
   display: string;
