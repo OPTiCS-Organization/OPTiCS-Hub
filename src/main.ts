@@ -11,6 +11,11 @@ async function bootstrap() {
 
   app.set('trust proxy', true);
 
+  app.enableCors({
+    origin: process.env.CORS_ORIGIN?.split(',') ?? '*',
+    credentials: true,
+  });
+
   app.useGlobalPipes(new ValidationPipe());
 
   const jwtUtil = app.get(JwtUtil);
