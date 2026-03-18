@@ -12,12 +12,12 @@ export class WorkspaceController {
     private readonly workspaceService: WorkspaceService,
   ) { }
 
-  @Post('/status/heartbeat')
+  @Post('/v1/status/heartbeat')
   handleHeartbeat(@Body() data) {
     this.workspaceService.handleHeartbeat(data)
   }
 
-  @Post('/initialize')
+  @Post('/v1/initialize')
   async handleInitializeServer(@Body() body, @Req() req) {
     const ip = req.headers['x-forwarded-for'] || req.ip;
     const data = await this.workspaceService.handleInitializeServer(body, ip);
@@ -31,7 +31,7 @@ export class WorkspaceController {
     return response;
   }
 
-  @Post('/workspace')
+  @Post('/v1/workspace')
   @UseGuards(JwtGuard)
   async handleCreateWorkspace(@Request() request: any, @Body() body: CreateWorkspace) {
     const data = await this.workspaceService.handleCreateWorkspace(request.user.userIndex, body.workspaceName);
@@ -49,7 +49,7 @@ export class WorkspaceController {
    * Todo 
    * 이미 연결된 에이전트에 다시 연결할 수 없도록 처리하기
    */
-  @Post('/:workspaceIdx/connect')
+  @Post('/v1/:workspaceIdx/connect')
   @UseGuards(JwtGuard)
   async handleConnectWorkspace(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
     const data = await this.workspaceService.handleConnectWorkspace(request.user.userIndex, parseInt(param), body.targetAgentCode);

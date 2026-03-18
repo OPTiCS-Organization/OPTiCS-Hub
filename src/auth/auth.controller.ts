@@ -11,12 +11,12 @@ import { Code } from 'src/global/Code.enum';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('/check-email')
+  @Post('/v1/check-email')
   async checkEmail(@Body() body: CheckEmailDTO): Promise<{ exists: boolean }> {
     return await this.authService.checkEmail(body);
   }
 
-  @Post('/register')
+  @Post('/v1/register')
   @UseInterceptors(CookieInterceptor)
   async register(@Body() body: RegisterDTO) {
     const response: GlobalResponse = {
@@ -29,7 +29,7 @@ export class AuthController {
     return { ...tokens, ...response }
   }
 
-  @Post('/login')
+  @Post('/v1/login')
   @UseInterceptors(CookieInterceptor)
   async login(@Body() body: LoginDTO) {
     const response: GlobalResponse = {
