@@ -48,6 +48,31 @@ export class WorkspaceService {
     return newWorkspace;
   }
 
+  async handleGetWorkspace(owner: number) {
+    const workspaces = await this.prismaService.workspaces.findMany({
+      select: {
+        workspace_name: true,
+        workspace_index: true,
+        workspace_status: true,
+        workspace_last_online: true
+      },
+      where: {
+        workspace_owner: owner
+      }
+    });
+    return { workspaces }
+  }
+
+  async handleDeleteWorkspace(owner: number, workspaceIdx) {
+    const workspaceData = await this.prismaService.workspaces.delete({
+      where: {
+        workspace_index: workspaceIdx,
+        workspace_owner: owner,
+      }
+    });
+    return workspaceData
+  }
+
   async handleConnectWorkspace(owner: number, targetWorkspaceIdx: number, targetAgentCode: string) {
     const workspace = await this.prismaService.workspaces.findFirst({
       where: {

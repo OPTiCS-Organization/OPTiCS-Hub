@@ -1,23 +1,24 @@
-import { Body, Controller, Param, Post, Req, Request, UseGuards } from '@nestjs/common';
-import { WorkspaceService } from './workspace.service';
+import { Body, Controller, Delete, Get, Param, Post, Req, Request, UseGuards } from '@nestjs/common';
+import { WorkspaceService } from '../workspace.service';
 import { JwtGuard } from 'src/auth/interceptor/guard/jwt.guard';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
-import { CreateWorkspace } from './dto/CreateWorkspace.dto';
-import { ConnectWorkspace } from './dto/ConnectWorkspace.dto';
+import { CreateWorkspace } from '../dto/CreateWorkspace.dto';
+import { ConnectWorkspace } from '../dto/ConnectWorkspace.dto';
+import { DeleteWorkspace } from '../dto/DeleteWorkspace.dto';
 
-@Controller('workspace')
+@Controller({ path: 'workspace', version: '1' })
 export class WorkspaceController {
   constructor(
     private readonly workspaceService: WorkspaceService,
   ) { }
 
-  @Post('/v1/status/heartbeat')
+  @Post('status/heartbeat')
   handleHeartbeat(@Body() data) {
     this.workspaceService.handleHeartbeat(data)
   }
 
-  @Post('/v1/initialize')
+  @Post('initialize')
   async handleInitializeServer(@Body() body, @Req() req) {
     const ip = req.headers['x-forwarded-for'] || req.ip;
     const data = await this.workspaceService.handleInitializeServer(body, ip);
@@ -31,7 +32,7 @@ export class WorkspaceController {
     return response;
   }
 
-  @Post('/v1/workspace')
+  @Post()
   @UseGuards(JwtGuard)
   async handleCreateWorkspace(@Request() request: any, @Body() body: CreateWorkspace) {
     const data = await this.workspaceService.handleCreateWorkspace(request.user.userIndex, body.workspaceName);
@@ -45,11 +46,41 @@ export class WorkspaceController {
     return response;
   }
 
+  @Get()
+  @UseGuards(JwtGuard)
+  async handleGetWorkspace(@Request() request: any) {
+    const data = await this.workspaceService.handleGetWorkspace(request.user.userIndex);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        workspaces: data
+      },
+      message: 'Found Workspaces Successfully.'
+    }
+
+    return response
+  }
+
+  @Delete()
+  @UseGuards(JwtGuard)
+  async handleDeleteWorkspace(@Request() request: any, @Body() body: DeleteWorkspace) {
+    const data = this.workspaceService.handleDeleteWorkspace(request.user.userIndex, body.workspaceIndex)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        data
+      },
+      message: 'Deleted Workspace Successfully.'
+    }
+
+    return response;
+  }
+
   /**
    * Todo 
    * 이미 연결된 에이전트에 다시 연결할 수 없도록 처리하기
    */
-  @Post('/v1/:workspaceIdx/connect')
+  @Post(':workspaceIdx/connect')
   @UseGuards(JwtGuard)
   async handleConnectWorkspace(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
     const data = await this.workspaceService.handleConnectWorkspace(request.user.userIndex, parseInt(param), body.targetAgentCode);

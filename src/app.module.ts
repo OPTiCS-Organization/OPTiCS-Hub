@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { WorkspaceController } from './workspaces/workspace.controller';
+import { WorkspaceController } from './workspaces/v1/workspace.controller';
 import { WorkspaceService } from './workspaces/workspace.service';
 import { WorkspaceModule } from './workspaces/workspace.module';
 import { AuthModule } from './auth/auth.module';

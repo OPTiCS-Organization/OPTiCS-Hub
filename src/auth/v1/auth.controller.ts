@@ -1,22 +1,22 @@
 import { Body, Controller, Post, UseInterceptors } from '@nestjs/common';
-import { AuthService } from './auth.service';
-import { RegisterDTO } from './dto/register.dto';
-import { LoginDTO } from './dto/login.dto';
-import { CheckEmailDTO } from './dto/check-email.dto';
+import { AuthService } from '../auth.service';
+import { RegisterDTO } from '../dto/register.dto';
+import { LoginDTO } from '../dto/login.dto';
+import { CheckEmailDTO } from '../dto/check-email.dto';
 import { CookieInterceptor } from 'src/global/Cookie.intercepter';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
 
-@Controller('auth')
+@Controller({ path: 'auth', version: '1' })
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('/v1/check-email')
+  @Post('check-email')
   async checkEmail(@Body() body: CheckEmailDTO): Promise<{ exists: boolean }> {
     return await this.authService.checkEmail(body);
   }
 
-  @Post('/v1/register')
+  @Post('register')
   @UseInterceptors(CookieInterceptor)
   async register(@Body() body: RegisterDTO) {
     const response: GlobalResponse = {
@@ -29,7 +29,7 @@ export class AuthController {
     return { ...tokens, ...response }
   }
 
-  @Post('/v1/login')
+  @Post('login')
   @UseInterceptors(CookieInterceptor)
   async login(@Body() body: LoginDTO) {
     const response: GlobalResponse = {
