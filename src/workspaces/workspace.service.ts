@@ -5,7 +5,7 @@ import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 
 @Injectable()
-export class ServerService {
+export class WorkspaceService {
   constructor(
     private readonly prismaService: PrismaService,
   ) { };
@@ -30,47 +30,47 @@ export class ServerService {
     const newConnection = await this.prismaService.agents.create({
       data: {
         agent_ip: ip,
-        agent_token: generate() + '-' + generate(),
+        agent_token: `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`,
       }
     });
 
     return newConnection.agent_token;
   }
 
-  async handleCreateContainer(owner: number, containerName: string | undefined) {
-    const newContainer = await this.prismaService.containers.create({
+  async handleCreateWorkspace(owner: number, workspaceName: string | undefined) {
+    const newWorkspace = await this.prismaService.workspaces.create({
       data: {
-        container_owner: owner,
-        container_name: containerName ?? 'Unnamed Container',
+        workspace_owner: owner,
+        workspace_name: workspaceName ?? 'Unnamed Workspace',
       }
     });
 
-    return newContainer;
+    return newWorkspace;
   }
 
-  async handleConnectContainer(owner: number, targetContainerIdx: number, targetAgentCode: string) {
-    const container = await this.prismaService.containers.findFirst({
+  async handleConnectWorkspace(owner: number, targetWorkspaceIdx: number, targetAgentCode: string) {
+    const workspace = await this.prismaService.workspaces.findFirst({
       where: {
-        container_owner: owner,
-        container_index: targetContainerIdx,
+        workspace_owner: owner,
+        workspace_index: targetWorkspaceIdx,
       },
     });
 
-    if (!container) throw new NotFoundException('Container Not Found.');
-    if (container.agent_token) throw new ConflictException('This Agent has Already Linked With Another Container.');
+    if (!workspace) throw new NotFoundException('Workspace Not Found.');
+    if (workspace.agent_token) throw new ConflictException('This Agent has Already Linked With Another Workspace.');
 
-    container.agent_token = targetAgentCode;
-    container.container_status = 'linked';
+    workspace.agent_token = targetAgentCode;
+    workspace.workspace_status = 'linked';
 
     return await this.prismaService.$transaction([
-      this.prismaService.containers.update({
+      this.prismaService.workspaces.update({
         where: {
-          container_owner: owner,
-          container_index: targetContainerIdx,
+          workspace_owner: owner,
+          workspace_index: targetWorkspaceIdx,
         },
         data: {
           agent_token: targetAgentCode,
-          container_status: 'linked',
+          workspace_status: 'linked',
         }
       }),
       this.prismaService.agents.update({

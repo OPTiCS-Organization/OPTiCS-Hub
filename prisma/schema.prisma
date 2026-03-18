@@ -19,7 +19,7 @@ model users {
   user_password    String
   user_permission  UserPermission  @default(unverified)
   user_restriction Boolean         @default(false)
-  containers       containers[]
+  workspaces       workspaces[]
   refreshTokens    refresh_token[]
 }
 
@@ -36,17 +36,17 @@ model refresh_token {
 /**
  * Connection Code로 중앙 서버 컨테이너와 연결이 성립된 서버
  */
-model containers {
-  container_index       Int        @id @default(autoincrement())
-  container_owner       Int
-  container_name        String
+model workspaces {
+  workspace_index       Int        @id @default(autoincrement())
+  workspace_owner       Int
+  workspace_name        String
   agent_token           String?
-  container_status      HostStatus @default(unlinked)
-  container_last_online DateTime?
-  container_created_at  DateTime   @default(now())
-  container_deleted_at  DateTime?
+  workspace_status      HostStatus @default(unlinked)
+  workspace_last_online DateTime?
+  workspace_created_at  DateTime   @default(now())
+  workspace_deleted_at  DateTime?
 
-  owner users @relation(fields: [container_owner], references: [user_index])
+  owner users @relation(fields: [workspace_owner], references: [user_index])
 }
 
 /**

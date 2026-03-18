@@ -1,7 +1,7 @@
 import { IsOptional, IsString } from "class-validator";
 
-export class CreateContainer {
+export class CreateWorkspace {
   @IsOptional()
   @IsString()
-  containerName: string | undefined;
+  workspaceName: string | undefined;
 }

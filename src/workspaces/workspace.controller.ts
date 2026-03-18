@@ -1,26 +1,26 @@
 import { Body, Controller, Param, Post, Req, Request, UseGuards } from '@nestjs/common';
-import { ServerService } from './server.service';
+import { WorkspaceService } from './workspace.service';
 import { JwtGuard } from 'src/auth/interceptor/guard/jwt.guard';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
-import { CreateContainer } from './dto/CreateContainer.dto';
-import { ConnectContainer } from './dto/ConnectContainer.dto';
+import { CreateWorkspace } from './dto/CreateWorkspace.dto';
+import { ConnectWorkspace } from './dto/ConnectWorkspace.dto';
 
-@Controller('server')
-export class ServerController {
+@Controller('workspace')
+export class WorkspaceController {
   constructor(
-    private readonly serverService: ServerService,
+    private readonly workspaceService: WorkspaceService,
   ) { }
 
   @Post('/status/heartbeat')
   handleHeartbeat(@Body() data) {
-    this.serverService.handleHeartbeat(data)
+    this.workspaceService.handleHeartbeat(data)
   }
 
   @Post('/initialize')
   async handleInitializeServer(@Body() body, @Req() req) {
     const ip = req.headers['x-forwarded-for'] || req.ip;
-    const data = await this.serverService.handleInitializeServer(body, ip);
+    const data = await this.workspaceService.handleInitializeServer(body, ip);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -31,14 +31,14 @@ export class ServerController {
     return response;
   }
 
-  @Post('/container')
+  @Post('/workspace')
   @UseGuards(JwtGuard)
-  async handleCreateContainer(@Request() request: any, @Body() body: CreateContainer) {
-    const data = await this.serverService.handleCreateContainer(request.user.userIndex, body.containerName);
+  async handleCreateWorkspace(@Request() request: any, @Body() body: CreateWorkspace) {
+    const data = await this.workspaceService.handleCreateWorkspace(request.user.userIndex, body.workspaceName);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
-        createdAt: data.container_created_at
+        createdAt: data.workspace_created_at
       },
       message: 'Created Successfully.',
     }
@@ -49,10 +49,10 @@ export class ServerController {
    * Todo 
    * 이미 연결된 에이전트에 다시 연결할 수 없도록 처리하기
    */
-  @Post('/:containerIdx/connect')
+  @Post('/:workspaceIdx/connect')
   @UseGuards(JwtGuard)
-  async handleConnectContainer(@Request() request: any, @Param('containerIdx') param: string, @Body() body: ConnectContainer) {
-    const data = await this.serverService.handleConnectContainer(request.user.userIndex, parseInt(param), body.targetAgentCode);
+  async handleConnectWorkspace(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
+    const data = await this.workspaceService.handleConnectWorkspace(request.user.userIndex, parseInt(param), body.targetAgentCode);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
