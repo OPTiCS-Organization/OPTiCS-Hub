@@ -113,7 +113,7 @@ export class WorkspaceController {
     const response: GlobalResponse = {
       code: Code.Common.NOT_IMPLEMENTED,
       data: data,
-      message: 'Not Implemented API. Please Request Later.'
+      message: 'Success.'
     }
     return response;
   }

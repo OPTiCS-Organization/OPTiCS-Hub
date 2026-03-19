@@ -162,12 +162,41 @@ export class WorkspaceService {
   }
 
   async handleGetWorkspaceInformation(owner: number, targetWorkspaceName: string) {
-    const data = await this.prismaService.workspaces.findFirst({
+    const rawWorkspaceData = await this.prismaService.workspaces.findFirst({
+      select: {
+        workspace_index: true,
+        workspace_name: true,
+        workspace_created_at: true,
+      },
       where: {
         workspace_owner: owner,
-        workspace_name: targetWorkspaceName
+        workspace_name: targetWorkspaceName,
+        workspace_deleted_at: null
       }
     });
-    return data;
+
+    if (!rawWorkspaceData) throw new NotFoundException('Target Workspace Not Found.');
+
+    const rawConnectedAgents = await this.prismaService.agents.findMany({
+      select: {
+        agent_code: true,
+        agent_connection: true,
+        agent_status: true,
+        agent_last_online: true,
+      },
+      where: {
+        agent_connection: 'linked',
+        agent_parent_workspace: rawWorkspaceData.workspace_index,
+      }
+    })
+
+    const response = {
+      workspaceIndex: rawWorkspaceData.workspace_index,
+      workspaceName: rawWorkspaceData.workspace_name,
+      workspaceCreatedAt: rawWorkspaceData.workspace_created_at,
+      agents: rawConnectedAgents
+    }
+
+    return toCamelCase(response);
   }
 }
