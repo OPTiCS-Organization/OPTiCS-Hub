@@ -34,6 +34,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
     const user = {
       userIndex: exist.user_index,
+      userDisplay: exist.user_display,
       userEmail: exist.user_email,
       userPermission: exist.user_permission,
       userRestriction: exist.user_restriction,

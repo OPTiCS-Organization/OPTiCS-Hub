@@ -1,4 +1,5 @@
 import { ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import axios from 'axios';
 import ms from 'ms';
 import { generate } from 'random-words';
 import log from 'spectra-log';
@@ -74,7 +75,8 @@ export class WorkspaceService {
         workspace_index: true,
       },
       where: {
-        workspace_owner: owner
+        workspace_owner: owner,
+        workspace_deleted_at: null,
       }
     });
 
@@ -111,11 +113,12 @@ export class WorkspaceService {
     return { workspaceDeletedAt: workspaceDeleteTimestamp };
   }
 
-  async requestConnectWorkspaceAndAgent(workspaceOwner: number, targetWorkspaceIdx: number, targetAgentCode: string) {
+  async requestConnectWorkspaceAndAgent(workspaceOwner: number, targetWorkspaceIdx: number, targetAgentCode: string, workspaceOwnerName: string) {
     const rawWorkspace = await this.prismaService.workspaces.findFirst({
       where: {
         workspace_owner: workspaceOwner,
         workspace_index: targetWorkspaceIdx,
+        workspace_deleted_at: null,
       },
     });
 
@@ -135,6 +138,7 @@ export class WorkspaceService {
       select: {
         agent_connection: true,
         agent_parent_workspace: true,
+        agent_ip: true,
       },
       data: {
         agent_connection: 'requested',
@@ -143,6 +147,15 @@ export class WorkspaceService {
       where: {
         agent_code: targetAgentCode
       }
+    });
+
+    const agentUrl = `http://${rawUpdatedAgent.agent_ip}:5230`;
+    await axios.post(`${agentUrl}/v1/notify/connect-request`, {
+      workspaceOwnerName: workspaceOwnerName,
+      workspaceName: rawWorkspace.workspace_name,
+      workspaceCreatedAt: rawWorkspace.workspace_created_at,
+      workspaceIndex: rawWorkspace.workspace_index,
+      requestDatetime: new Date()
     });
 
     return toCamelCase(rawUpdatedAgent);

@@ -20,7 +20,8 @@ export class WorkspaceController {
 
   @Post('initialize')
   async handleInitializeServer(@Body() body, @Req() req) {
-    const ip = req.headers['x-forwarded-for'] || req.ip;
+    const rawIp: string = req.headers['x-forwarded-for'] || req.ip;
+    const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace('::ffff:', '');
     const data = await this.workspaceService.handleInitializeServer(body, ip);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
@@ -94,13 +95,13 @@ export class WorkspaceController {
   @Post(':workspaceIdx/connect')
   @UseGuards(JwtGuard)
   async handleConnectAgent(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
-    const data = await this.workspaceService.requestConnectWorkspaceAndAgent(request.user.userIndex, parseInt(param), body.targetAgentCode);
+    const data = await this.workspaceService.requestConnectWorkspaceAndAgent(request.user.userIndex, parseInt(param), body.targetAgentCode, request.user.userDisplay);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
         data
       },
-      message: 'Connected Successfully.',
+      message: 'Connect Request Sent. Please Check Agent-Side Dashboard.',
     };
     return response;
   }
