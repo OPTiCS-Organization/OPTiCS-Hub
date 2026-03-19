@@ -2,6 +2,7 @@ export const Code = {
   Common: {
     SUCCESS: 'F200',
     FAIL: 'F400',
+    NOT_IMPLEMENTED: 'F501',
   },
 
   Authentication: {

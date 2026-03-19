@@ -4,7 +4,7 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
-import { catchError, map, Observable, tap } from 'rxjs';
+import { catchError, map, Observable } from 'rxjs';
 import log from 'spectra-log';
 import { cookieOptions } from './cookie-options';
 
@@ -15,7 +15,6 @@ export class CookieInterceptor implements NestInterceptor {
       map((data) => {
         const { accessToken, refreshToken, ...rest } = data;
         const response = context.switchToHttp().getResponse();
-        log(data)
         if (refreshToken) {
           response.cookie('refreshToken', refreshToken, cookieOptions());
           log('refresh token set.') 

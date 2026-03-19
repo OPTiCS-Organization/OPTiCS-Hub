@@ -1,4 +1,4 @@
-import { Body, Controller, Post, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Post, UseGuards, UseInterceptors } from '@nestjs/common';
 import { AuthService } from '../auth.service';
 import { RegisterDTO } from '../dto/register.dto';
 import { LoginDTO } from '../dto/login.dto';
@@ -6,6 +6,7 @@ import { CheckEmailDTO } from '../dto/check-email.dto';
 import { CookieInterceptor } from 'src/global/Cookie.intercepter';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
+import { JwtGuard } from '../interceptor/guard/jwt.guard';
 
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
@@ -40,5 +41,17 @@ export class AuthController {
 
     const tokens = await this.authService.login(body);
     return { ...tokens, ...response }
+  }
+
+  @Get('me')
+  @UseGuards(JwtGuard)
+  async credentials() {
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Verified.'
+    }
+
+    return response
   }
 }

@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, VersioningType } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { HttpExceptionFilter, TokenRefreshFilter } from './global/Global.filter';
 import { JwtUtil } from './auth/util/jwt.util';
@@ -16,6 +16,10 @@ async function bootstrap() {
     credentials: true,
   });
 
+  app.enableVersioning({ 
+    type: VersioningType.URI
+  })
+
   app.useGlobalPipes(new ValidationPipe());
 
   const jwtUtil = app.get(JwtUtil);
@@ -29,4 +33,5 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
+
 bootstrap();

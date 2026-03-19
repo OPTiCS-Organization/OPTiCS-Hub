@@ -33,19 +33,15 @@ model refresh_token {
   owner users @relation(fields: [token_owner], references: [user_index])
 }
 
-/**
- * Connection Code로 중앙 서버 컨테이너와 연결이 성립된 서버
- */
 model workspaces {
-  workspace_index       Int        @id @default(autoincrement())
-  workspace_owner       Int
+  workspace_index       Int         @id @default(autoincrement())
+  workspace_owner       Int     
   workspace_name        String
-  agent_token           String?
-  workspace_status      HostStatus @default(unlinked)
-  workspace_last_online DateTime?
-  workspace_created_at  DateTime   @default(now())
+  workspace_created_at  DateTime    @default(now())
   workspace_deleted_at  DateTime?
+  agents                agents[]
 
+  @@unique([workspace_owner, workspace_name])
   owner users @relation(fields: [workspace_owner], references: [user_index])
 }
 
@@ -53,12 +49,17 @@ model workspaces {
  * 새 OPTiCS 에이전트를 생성했을 때 연결 코드
  */
 model agents {
-  agent_index       Int      @id @default(autoincrement())
-  agent_ip          String
-  agent_token       String   @unique
-  agent_established Boolean  @default(false)
-  agent_created_at  DateTime @default(now())
-  agent_deleted_at  DateTime?
+  agent_index             Int               @id @default(autoincrement())
+  agent_ip                String
+  agent_code              String            @unique
+  agent_parent_workspace  Int?        
+  agent_connection        ConnectionStatus  @default(unlinked)
+  agent_status            AgentStatus       @default(waiting)
+  agent_created_at        DateTime          @default(now())
+  agent_deleted_at        DateTime?
+  agent_last_online       DateTime          @default(now())
+
+  parent workspaces? @relation(fields: [agent_parent_workspace], references: [workspace_index])
 }
 
 enum UserPermission {
@@ -68,8 +69,16 @@ enum UserPermission {
   administrator
 }
 
-enum HostStatus {
+enum ConnectionStatus {
   unlinked
+  requested
   linked
+}
+
+enum AgentStatus {
+  waiting
+  online
   offline
+  restarting
+  failed
 }

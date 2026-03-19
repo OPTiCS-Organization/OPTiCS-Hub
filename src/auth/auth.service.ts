@@ -24,7 +24,7 @@ export class AuthService {
 
   async register(dto: RegisterDTO) {
     if (dto.password !== dto.passwordConfirm) {
-      throw new BadRequestException('비밀번호가 일치하지 않습니다.');
+      throw new BadRequestException('Password Confirm Does Not Match.');
     }
 
     if (
@@ -32,7 +32,7 @@ export class AuthService {
         where: { user_email: dto.email },
       })
     ) {
-      throw new ConflictException('이미 사용중인 이메일입니다.');
+      throw new ConflictException('Already Using Email.');
     }
 
     const user = await this.prismaService.users.create({
@@ -61,7 +61,7 @@ export class AuthService {
       !(await bcrypt.compare(dto.password, foundUser.user_password))
     ) {
       throw new ConflictException(
-        '일치하는 이메일과 패스워드를 찾지 못했습니다.',
+        'Matching Email and Password Not Found.',
       );
     }
 

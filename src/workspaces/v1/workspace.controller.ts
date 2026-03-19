@@ -5,7 +5,7 @@ import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
 import { CreateWorkspace } from '../dto/CreateWorkspace.dto';
 import { ConnectWorkspace } from '../dto/ConnectWorkspace.dto';
-import { DeleteWorkspace } from '../dto/DeleteWorkspace.dto';
+import { CheckWorkspaceName } from '../dto/CheckWorkspaceName.dto';
 
 @Controller({ path: 'workspace', version: '1' })
 export class WorkspaceController {
@@ -39,32 +39,47 @@ export class WorkspaceController {
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
-        createdAt: data.workspace_created_at
+        data
       },
       message: 'Created Successfully.',
     }
     return response;
   }
 
+  @Post('check-workspace-name')
+  @UseGuards(JwtGuard)
+  async handleValidateWorkspaceName(@Request() request: any, @Body() body: CheckWorkspaceName) {
+    const validation = await this.workspaceService.handleValidateWorkspace(request.user.userIndex, body.workspaceName);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        valid: validation,
+      },
+      message: validation === true ? 'This Workspace Name is Valid.' : 'This Workspace Name is Already Using.',
+    }
+
+    return response;
+  }
+
   @Get()
   @UseGuards(JwtGuard)
-  async handleGetWorkspace(@Request() request: any) {
-    const data = await this.workspaceService.handleGetWorkspace(request.user.userIndex);
+  async handleGetWorkspaceList(@Request() request: any) {
+    const data = await this.workspaceService.handleGetWorkspaceList(request.user.userIndex);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
         workspaces: data
       },
-      message: 'Found Workspaces Successfully.'
+      message: `Found ${data.length} Workspaces Successfully.`
     }
 
     return response
   }
 
-  @Delete()
+  @Delete(':workspaceIdx')
   @UseGuards(JwtGuard)
-  async handleDeleteWorkspace(@Request() request: any, @Body() body: DeleteWorkspace) {
-    const data = this.workspaceService.handleDeleteWorkspace(request.user.userIndex, body.workspaceIndex)
+  async handleDeleteWorkspace(@Request() request: any, @Param('workspaceIdx') param: string) {
+    const data = await this.workspaceService.handleDeleteWorkspace(request.user.userIndex, parseInt(param))
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -76,14 +91,10 @@ export class WorkspaceController {
     return response;
   }
 
-  /**
-   * Todo 
-   * 이미 연결된 에이전트에 다시 연결할 수 없도록 처리하기
-   */
   @Post(':workspaceIdx/connect')
   @UseGuards(JwtGuard)
-  async handleConnectWorkspace(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
-    const data = await this.workspaceService.handleConnectWorkspace(request.user.userIndex, parseInt(param), body.targetAgentCode);
+  async handleConnectAgent(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ConnectWorkspace) {
+    const data = await this.workspaceService.requestConnectWorkspaceAndAgent(request.user.userIndex, parseInt(param), body.targetAgentCode);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -91,6 +102,18 @@ export class WorkspaceController {
       },
       message: 'Connected Successfully.',
     };
+    return response;
+  }
+
+  @Get(':workspaceName')
+  @UseGuards(JwtGuard)
+  async handleGetWorkspaceInformation(@Request() request: any, @Param('workspaceName') param: string) {
+    const data = await this.workspaceService.handleGetWorkspaceInformation(request.user.userIndex, param);
+    const response: GlobalResponse = {
+      code: Code.Common.NOT_IMPLEMENTED,
+      data: data,
+      message: 'Not Implemented API. Please Request Later.'
+    }
     return response;
   }
 }
