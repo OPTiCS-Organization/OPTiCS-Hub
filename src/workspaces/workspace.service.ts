@@ -1,7 +1,5 @@
 import { ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import axios from 'axios';
-import ms from 'ms';
-import { generate } from 'random-words';
 import log from 'spectra-log';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
@@ -14,29 +12,6 @@ export class WorkspaceService {
 
   handleHeartbeat(data) {
     log(data);
-  }
-
-  async handleInitializeServer(data, ip) {
-    const connection = await this.prismaService.agents.findFirst({
-      where: {
-        agent_ip: ip,
-        agent_deleted_at: null,
-        agent_created_at: {
-          gte: new Date(Date.now() - ms('1d')),
-        }
-      }
-    });
-
-    if (connection) return connection.agent_code;
-
-    const newConnection = await this.prismaService.agents.create({
-      data: {
-        agent_ip: ip,
-        agent_code: `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`,
-      }
-    });
-
-    return newConnection.agent_code;
   }
 
   async handleCreateWorkspace(owner: number, workspaceName: string | undefined) {
@@ -73,6 +48,17 @@ export class WorkspaceService {
       select: {
         workspace_name: true,
         workspace_index: true,
+        agents: {
+          select: {
+            agent_connection: true,
+            agent_last_online: true,
+          },
+          where: {
+            agent_connection: 'linked',
+          },
+          orderBy: { agent_last_online: 'desc' },
+          take: 1,
+        },
       },
       where: {
         workspace_owner: owner,
@@ -80,7 +66,14 @@ export class WorkspaceService {
       }
     });
 
-    return toCamelCase(rawWorkspaceList);
+    const workspaceList = rawWorkspaceList.map(w => ({
+      workspaceIndex: w.workspace_index,
+      workspaceName: w.workspace_name,
+      status: w.agents.length > 0 ? 'linked' : 'unlinked',
+      lastOnline: w.agents[0]?.agent_last_online ?? null,
+    }));
+
+    return workspaceList;
   }
 
   async handleDeleteWorkspace(owner: number, workspaceIdx) {

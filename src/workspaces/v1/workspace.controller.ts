@@ -18,21 +18,6 @@ export class WorkspaceController {
     this.workspaceService.handleHeartbeat(data)
   }
 
-  @Post('initialize')
-  async handleInitializeServer(@Body() body, @Req() req) {
-    const rawIp: string = req.headers['x-forwarded-for'] || req.ip;
-    const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace('::ffff:', '');
-    const data = await this.workspaceService.handleInitializeServer(body, ip);
-    const response: GlobalResponse = {
-      code: Code.Common.SUCCESS,
-      data: {
-        connectionCode: data,
-      },
-      message: 'Initialized Successfully.',
-    }
-    return response;
-  }
-
   @Post()
   @UseGuards(JwtGuard)
   async handleCreateWorkspace(@Request() request: any, @Body() body: CreateWorkspace) {
