@@ -3,11 +3,13 @@ import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
 import { generate } from 'random-words';
 import log from 'spectra-log';
+import { ConsoleGateway } from './console.gateway';
 
 @Injectable()
 export class AgentService {
   constructor (
     private readonly prismaService: PrismaService,
+    private readonly consoleGateway: ConsoleGateway,
   ) { };
 
   async handleAcceptConnectRequest(agentCode: string) {
@@ -31,6 +33,7 @@ export class AgentService {
       }
     })
 
+    this.consoleGateway.notifyAgentUpdated();
     return toCamelCase(rawUpdatedAgent);
   }
 
@@ -40,7 +43,7 @@ export class AgentService {
     if (existingCode) {
       const valid = await this.prismaService.agents.findFirst({
         where: {
-          agent_code: existingCode,
+          agent_code: existingCode.toUpperCase(),
           agent_created_at: { gte: since },
         },
       });
@@ -57,7 +60,7 @@ export class AgentService {
 
     if (byIp) return byIp.agent_code;
 
-    const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`;
+    const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
 
     await this.prismaService.agents.create({
       data: {
@@ -68,6 +71,35 @@ export class AgentService {
     });
 
     return agentCode;
+  }
+
+  async getAgentList(userIndex: number, workspaceIdx: number) {
+    const rawAgents = await this.prismaService.agents.findMany({
+      where: {
+        agent_deleted_at: null,
+        agent_connection: { in: ['requested', 'linked'] },
+        parent: {
+          workspace_index: workspaceIdx,
+          workspace_owner: userIndex,
+          workspace_deleted_at: null,
+        },
+      },
+      orderBy: { agent_created_at: 'desc' },
+      include: {
+        parent: { select: { workspace_name: true } },
+      },
+    });
+
+    return rawAgents.map((a) => ({
+      agentIndex: a.agent_index,
+      agentIp: a.agent_connection === 'linked' ? a.agent_ip : null,
+      agentCode: a.agent_code,
+      agentConnection: a.agent_connection,
+      agentStatus: a.agent_status,
+      agentCreatedAt: a.agent_created_at,
+      agentLastOnline: a.agent_last_online,
+      workspaceName: a.parent?.workspace_name ?? null,
+    }));
   }
 
   async markAgentOffline(socketId: string): Promise<void> {
@@ -99,6 +131,7 @@ export class AgentService {
       }
     })
 
+    this.consoleGateway.notifyAgentUpdated();
     return toCamelCase(rawUpdatedAgent);
   }
 }

@@ -120,7 +120,7 @@ export class WorkspaceService {
 
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
-        agent_code: targetAgentCode
+        agent_code: targetAgentCode.toUpperCase()
       }
     });
 

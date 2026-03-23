@@ -25,7 +25,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const existingCode = (client.handshake.auth as { agentCode?: string })?.agentCode;
     const agentCode = await this.agentService.registerAgent(ip, existingCode);
 
-    this.agentCodeToSocketId.set(agentCode, client.id);
+    this.agentCodeToSocketId.set(agentCode.toUpperCase(), client.id);
     client.data.agentCode = agentCode;
     client.emit('connected', { agentCode });
   }
@@ -33,13 +33,13 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
     if (agentCode) {
-      this.agentCodeToSocketId.delete(agentCode);
+      this.agentCodeToSocketId.delete(agentCode.toUpperCase());
     }
     this.agentService.markAgentOffline(client.id);
   }
 
   sendToAgent(agentCode: string, event: string, payload: unknown): boolean {
-    const socketId = this.agentCodeToSocketId.get(agentCode);
+    const socketId = this.agentCodeToSocketId.get(agentCode.toUpperCase());
     console.log(`[AgentGateway] sendToAgent | code=${agentCode} | socketId=${socketId ?? 'NOT FOUND'} | mapSize=${this.agentCodeToSocketId.size}`);
     if (!socketId) return false;
     this.server.to(socketId).emit(event, payload);
