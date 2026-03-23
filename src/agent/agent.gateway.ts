@@ -14,6 +14,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
+  private readonly agentCodeToSocketId = new Map<string, string>();
+
   constructor(private readonly agentService: AgentService) {}
 
   async handleConnection(client: Socket) {
@@ -22,10 +24,23 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const agentCode = await this.agentService.registerAgent(ip);
 
+    this.agentCodeToSocketId.set(agentCode, client.id);
+    client.data.agentCode = agentCode;
     client.emit('connected', { agentCode });
   }
 
   handleDisconnect(client: Socket) {
+    const agentCode = client.data.agentCode as string | undefined;
+    if (agentCode) {
+      this.agentCodeToSocketId.delete(agentCode);
+    }
     this.agentService.markAgentOffline(client.id);
+  }
+
+  sendToAgent(agentCode: string, event: string, payload: unknown): boolean {
+    const socketId = this.agentCodeToSocketId.get(agentCode);
+    if (!socketId) return false;
+    this.server.to(socketId).emit(event, payload);
+    return true;
   }
 }

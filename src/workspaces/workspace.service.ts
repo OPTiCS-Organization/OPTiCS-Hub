@@ -1,13 +1,14 @@
 import { ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
-import axios from 'axios';
 import log from 'spectra-log';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
+import { AgentGateway } from 'src/agent/agent.gateway';
 
 @Injectable()
 export class WorkspaceService {
   constructor(
     private readonly prismaService: PrismaService,
+    private readonly agentGateway: AgentGateway,
   ) { };
 
   handleHeartbeat(data) {
@@ -142,13 +143,12 @@ export class WorkspaceService {
       }
     });
 
-    const agentUrl = `http://${rawUpdatedAgent.agent_ip}:5230`;
-    await axios.post(`${agentUrl}/v1/notify/connect-request`, {
-      workspaceOwnerName: workspaceOwnerName,
+    this.agentGateway.sendToAgent(targetAgentCode, 'connect-request', {
+      workspaceOwnerName,
       workspaceName: rawWorkspace.workspace_name,
       workspaceCreatedAt: rawWorkspace.workspace_created_at,
       workspaceIndex: rawWorkspace.workspace_index,
-      requestDatetime: new Date()
+      requestDatetime: new Date(),
     });
 
     return toCamelCase(rawUpdatedAgent);
