@@ -22,7 +22,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const raw = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = raw === '::1' ? '127.0.0.1' : raw.replace(/^::ffff:/, '');
 
-    const agentCode = await this.agentService.registerAgent(ip);
+    const existingCode = (client.handshake.auth as { agentCode?: string })?.agentCode;
+    const agentCode = existingCode ?? await this.agentService.registerAgent(ip);
 
     this.agentCodeToSocketId.set(agentCode, client.id);
     client.data.agentCode = agentCode;
@@ -39,6 +40,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   sendToAgent(agentCode: string, event: string, payload: unknown): boolean {
     const socketId = this.agentCodeToSocketId.get(agentCode);
+    console.log(`[AgentGateway] sendToAgent | code=${agentCode} | socketId=${socketId ?? 'NOT FOUND'} | mapSize=${this.agentCodeToSocketId.size}`);
     if (!socketId) return false;
     this.server.to(socketId).emit(event, payload);
     return true;
