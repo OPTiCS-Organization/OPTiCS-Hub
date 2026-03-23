@@ -23,7 +23,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const ip = raw === '::1' ? '127.0.0.1' : raw.replace(/^::ffff:/, '');
 
     const existingCode = (client.handshake.auth as { agentCode?: string })?.agentCode;
-    const agentCode = existingCode ?? await this.agentService.registerAgent(ip);
+    const agentCode = await this.agentService.registerAgent(ip, existingCode);
 
     this.agentCodeToSocketId.set(agentCode, client.id);
     client.data.agentCode = agentCode;

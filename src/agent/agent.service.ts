@@ -34,10 +34,20 @@ export class AgentService {
     return toCamelCase(rawUpdatedAgent);
   }
 
-  async registerAgent(ip: string): Promise<string> {
+  async registerAgent(ip: string, existingCode?: string): Promise<string> {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    const existing = await this.prismaService.agents.findFirst({
+    if (existingCode) {
+      const valid = await this.prismaService.agents.findFirst({
+        where: {
+          agent_code: existingCode,
+          agent_created_at: { gte: since },
+        },
+      });
+      if (valid) return valid.agent_code;
+    }
+
+    const byIp = await this.prismaService.agents.findFirst({
       where: {
         agent_ip: ip,
         agent_created_at: { gte: since },
@@ -45,7 +55,7 @@ export class AgentService {
       orderBy: { agent_created_at: 'desc' },
     });
 
-    if (existing) return existing.agent_code;
+    if (byIp) return byIp.agent_code;
 
     const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`;
 
