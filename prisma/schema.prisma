@@ -62,11 +62,24 @@ model agents {
   parent workspaces? @relation(fields: [agent_parent_workspace], references: [workspace_index])
 }
 
+model services {
+  service_index         Int           @id @default(autoincrement())
+  service_name          String
+  service_port          Int
+  service_source_url    String
+  service_parent_agent  Int
+  service_status        ServiceStatus @default(waiting)
+  service_version       String
+  service_deploy_preset DeployPreset  @default(dockerfile)
+  service_created_at    DateTime      @default(now())
+  service_deleted_at    DateTime?
+}
+
 enum UserPermission {
   unverified
   verified
   moderator
-  administrator
+  administratorServices
 }
 
 enum ConnectionStatus {
@@ -81,4 +94,19 @@ enum AgentStatus {
   offline
   restarting
   failed
+}
+
+enum ServiceStatus {
+  waiting
+  building
+  running
+  stopped
+  failed
+}
+
+enum DeployPreset {
+  dockerfile
+  compose
+
+  preset_nestjs
 }

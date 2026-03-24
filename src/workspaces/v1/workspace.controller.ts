@@ -91,6 +91,44 @@ export class WorkspaceController {
     return response;
   }
 
+  @Post('/services/deploy')
+  @UseGuards(JwtGuard)
+  async handleCreateService(@Request() request: any, @Body() body: any) {
+    const data = await this.workspaceService.handleCreateService(request.user.userIndex, body);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Service Created Successfully.',
+    };
+    return response;
+  }
+
+  @Post('/services/:serviceIdx/start')
+  @UseGuards(JwtGuard)
+  async handleStartService(@Request() request: any, @Param('serviceIdx') param: string) {
+    const data = await this.workspaceService.handleStartService(param)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        service: data,
+      },
+      message: 'Server Start Commend Sent.'
+    }
+    return response;
+  }
+
+  @Get(':workspaceIdx/services')
+  @UseGuards(JwtGuard)
+  async handleGetServiceList(@Request() request: any, @Param('workspaceIdx') param: string) {
+    const data = await this.workspaceService.handleGetServiceList(request.user.userIndex, parseInt(param));
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { services: data },
+      message: `Found ${data.length} Services.`,
+    };
+    return response;
+  }
+
   @Get(':workspaceName')
   @UseGuards(JwtGuard)
   async handleGetWorkspaceInformation(@Request() request: any, @Param('workspaceName') param: string) {

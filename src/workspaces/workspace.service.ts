@@ -3,12 +3,15 @@ import log from 'spectra-log';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
 import { AgentGateway } from 'src/agent/agent.gateway';
+import { ConsoleGateway } from 'src/agent/console.gateway';
+import { DeployPreset } from '@prisma/client';
 
 @Injectable()
 export class WorkspaceService {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly agentGateway: AgentGateway,
+    private readonly consoleGateway: ConsoleGateway,
   ) { };
 
   handleHeartbeat(data) {
@@ -152,6 +155,120 @@ export class WorkspaceService {
     });
 
     return toCamelCase(rawUpdatedAgent);
+  }
+
+  async handleCreateService(
+    owner: number,
+    body: {
+      workspaceIdx: number,
+      serviceName: string;
+      servicePort: number;
+      serviceSourceUrl: string;
+      serviceVersion: string;
+      serviceDeployPreset: DeployPreset;
+      agentIndex: number;
+      env?: Record<string, string>;
+    },
+  ) {
+    const workspace = await this.prismaService.workspaces.findFirst({
+      where: { workspace_index: body.workspaceIdx, workspace_owner: owner, workspace_deleted_at: null },
+    });
+    if (!workspace) throw new NotFoundException('Workspace Not Found.');
+
+    const agent = await this.prismaService.agents.findFirst({
+      where: { agent_index: body.agentIndex, agent_parent_workspace: body.workspaceIdx, agent_connection: 'linked', agent_deleted_at: null },
+    });
+    if (!agent) throw new NotFoundException('Agent Not Found.');
+
+    const raw = await this.prismaService.services.create({
+      data: {
+        service_name: body.serviceName,
+        service_port: body.servicePort,
+        service_source_url: body.serviceSourceUrl,
+        service_version: body.serviceVersion,
+        service_deploy_preset: body.serviceDeployPreset as any,
+        service_parent_agent: body.agentIndex,
+      },
+    });
+
+    this.agentGateway.sendToAgent(agent.agent_code, 'command', {
+      command: 'DEPLOY',
+      serviceIndex: raw.service_index,
+      sourceUrl: body.serviceSourceUrl,
+      deployPreset: body.serviceDeployPreset,
+      serviceName: body.serviceName,
+      servicePort: body.servicePort,
+      serviceVersion: body.serviceVersion,
+      env: body.env ?? {},
+    });
+
+    this.consoleGateway.notifyAgentUpdated();
+    return toCamelCase(raw);
+  }
+
+  async handleStartService(serviceIdx: string) {
+    const rawService = await this.prismaService.services.findFirst({
+      where: {
+        service_index: parseInt(serviceIdx),
+        service_deleted_at: null,
+      }
+    });
+    if (!rawService) throw new NotFoundException('Service Not Found.');
+
+    const rawAgent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_index: rawService.service_parent_agent,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      }
+    });
+    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+
+    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+      command: 'START',
+      serviceIndex: rawService.service_index,
+      serviceName: rawService.service_name,
+      servicePort: rawService.service_port,
+      serviceVersion: rawService.service_version,
+    });
+
+    this.consoleGateway.notifyAgentUpdated();
+    return { serviceIndex: rawService.service_index };
+  }
+
+  async handleGetServiceList(owner: number, workspaceIdx: number) {
+    const workspace = await this.prismaService.workspaces.findFirst({
+      where: { workspace_index: workspaceIdx, workspace_owner: owner, workspace_deleted_at: null },
+    });
+
+    if (!workspace) throw new NotFoundException('Workspace Not Found.');
+
+    const agents = await this.prismaService.agents.findMany({
+      where: { agent_parent_workspace: workspaceIdx, agent_connection: 'linked', agent_deleted_at: null },
+      select: { agent_index: true, agent_code: true },
+    });
+
+    const agentIndexes = agents.map(a => a.agent_index);
+
+    const rawServices = await this.prismaService.services.findMany({
+      where: { service_parent_agent: { in: agentIndexes }, service_deleted_at: null },
+      orderBy: { service_created_at: 'desc' },
+    });
+
+    const agentCodeMap = new Map(agents.map(a => [a.agent_index, a.agent_code]));
+
+    return rawServices.map(s => ({
+      serviceIndex: s.service_index,
+      serviceName: s.service_name,
+      servicePort: s.service_port,
+      serviceSourceUrl: s.service_source_url,
+      serviceStatus: s.service_status,
+      serviceVersion: s.service_version,
+      serviceDeployPreset: s.service_deploy_preset,
+      serviceCreatedAt: s.service_created_at,
+      agentIndex: s.service_parent_agent,
+      agentCode: agentCodeMap.get(s.service_parent_agent) ?? null,
+    }));
   }
 
   async handleGetWorkspaceInformation(owner: number, targetWorkspaceName: string) {

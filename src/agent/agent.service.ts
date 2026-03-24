@@ -115,6 +115,13 @@ export class AgentService {
     }));
   }
 
+  async updateServiceStatus(serviceIndex: number, status: string): Promise<void> {
+    await this.prismaService.services.update({
+      where: { service_index: serviceIndex },
+      data: { service_status: status as any },
+    });
+  }
+
   async markAgentOffline(agentCode: string): Promise<void> {
     await this.prismaService.agents.updateMany({
       where: { agent_code: agentCode.toUpperCase() },
