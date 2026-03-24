@@ -34,8 +34,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const agentCode = client.data.agentCode as string | undefined;
     if (agentCode) {
       this.agentCodeToSocketId.delete(agentCode.toUpperCase());
+      void this.agentService.markAgentOffline(agentCode);
     }
-    this.agentService.markAgentOffline(client.id);
   }
 
   sendToAgent(agentCode: string, event: string, payload: unknown): boolean {

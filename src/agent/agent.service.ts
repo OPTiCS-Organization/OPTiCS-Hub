@@ -47,7 +47,13 @@ export class AgentService {
           agent_created_at: { gte: since },
         },
       });
-      if (valid) return valid.agent_code;
+      if (valid) {
+      await this.prismaService.agents.update({
+        where: { agent_code: valid.agent_code },
+        data: { agent_status: 'online' },
+      });
+      return valid.agent_code;
+    }
     }
 
     const byIp = await this.prismaService.agents.findFirst({
@@ -58,7 +64,13 @@ export class AgentService {
       orderBy: { agent_created_at: 'desc' },
     });
 
-    if (byIp) return byIp.agent_code;
+    if (byIp) {
+      await this.prismaService.agents.update({
+        where: { agent_code: byIp.agent_code },
+        data: { agent_status: 'online' },
+      });
+      return byIp.agent_code;
+    }
 
     const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
 
@@ -67,6 +79,7 @@ export class AgentService {
         agent_ip: ip,
         agent_code: agentCode,
         agent_connection: 'unlinked',
+        agent_status: 'online',
       },
     });
 
@@ -102,11 +115,12 @@ export class AgentService {
     }));
   }
 
-  async markAgentOffline(socketId: string): Promise<void> {
-    // socket.id는 DB에 없으므로 agent_last_online 기준으로 처리하거나
-    // 필요 시 socket_id 컬럼 추가 후 조회 가능
-    // 현재는 로그만 남김
-    console.log(`Agent disconnected: ${socketId}`);
+  async markAgentOffline(agentCode: string): Promise<void> {
+    await this.prismaService.agents.updateMany({
+      where: { agent_code: agentCode.toUpperCase() },
+      data: { agent_status: 'offline', agent_last_online: new Date() },
+    });
+    this.consoleGateway.notifyAgentUpdated();
   }
 
   async handleRejectConnectRequest(agentCode: string) {
