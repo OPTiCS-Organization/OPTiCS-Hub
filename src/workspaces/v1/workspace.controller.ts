@@ -6,6 +6,7 @@ import { Code } from 'src/global/Code.enum';
 import { CreateWorkspace } from '../dto/CreateWorkspace.dto';
 import { ConnectWorkspace } from '../dto/ConnectWorkspace.dto';
 import { CheckWorkspaceName } from '../dto/CheckWorkspaceName.dto';
+import { RedeployService } from '../dto/RedeployService.dto';
 
 @Controller({ path: 'workspace', version: '1' })
 export class WorkspaceController {
@@ -103,6 +104,18 @@ export class WorkspaceController {
     return response;
   }
 
+  @Post('/services/:serviceIdx/redeploy')
+  @UseGuards(JwtGuard)
+  async handleRedeployService(@Param('serviceIdx') param: string, @Body() body: RedeployService) {
+    const data = await this.workspaceService.handleRedeployService(param, body);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Redeploy Command Sent.',
+    };
+    return response;
+  }
+
   @Post('/services/:serviceIdx/start')
   @UseGuards(JwtGuard)
   async handleStartService(@Request() request: any, @Param('serviceIdx') param: string) {
@@ -113,6 +126,20 @@ export class WorkspaceController {
         service: data,
       },
       message: 'Server Start Commend Sent.'
+    }
+    return response;
+  }
+
+  @Post('/services/:serviceIdx/stop')
+  @UseGuards(JwtGuard)
+  async handleStopService(@Param('serviceIdx') param: string) {
+    const data = await this.workspaceService.handleStopService(param)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        service: data,
+      },
+      message: 'Server Stop Command Sent.'
     }
     return response;
   }
