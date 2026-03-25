@@ -102,6 +102,7 @@ enum ServiceStatus {
   running
   stopped
   failed
+  removed
 }
 
 enum DeployPreset {
