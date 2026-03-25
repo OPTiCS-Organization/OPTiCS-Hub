@@ -226,6 +226,7 @@ export class WorkspaceService {
       command: 'DELETE',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
+      deployPreset: rawService.service_deploy_preset,
     });
 
     return { serviceIndex: rawService.service_index };
@@ -301,6 +302,7 @@ export class WorkspaceService {
       serviceName: rawService.service_name,
       servicePort: rawService.service_port,
       serviceVersion: rawService.service_version,
+      deployPreset: rawService.service_deploy_preset,
     });
 
     this.consoleGateway.notifyAgentUpdated();
@@ -331,6 +333,7 @@ export class WorkspaceService {
       serviceName: rawService.service_name,
       servicePort: rawService.service_port,
       serviceVersion: rawService.service_version,
+      deployPreset: rawService.service_deploy_preset,
     });
 
     this.consoleGateway.notifyAgentUpdated();

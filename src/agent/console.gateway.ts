@@ -28,12 +28,13 @@ export class ConsoleGateway {
   }
 
   @SubscribeMessage('subscribe-log')
-  handleSubscribeLog(@MessageBody() payload: { agentCode: string; serviceIndex: number; serviceName: string }) {
+  handleSubscribeLog(@MessageBody() payload: { agentCode: string; serviceIndex: number; serviceName: string; deployPreset: string }) {
   log(`[{{ yellow : bold : Console Gateway }}] subscribe-log | agent=${payload.agentCode} | serviceIndex=${payload.serviceIndex} | name=${payload.serviceName}`);
     this.agentGateway.sendToAgent(payload.agentCode, 'command', {
       command: 'STREAM_LOG',
       serviceIndex: payload.serviceIndex,
       serviceName: payload.serviceName,
+      deployPreset: payload.deployPreset,
     });
   }
 
