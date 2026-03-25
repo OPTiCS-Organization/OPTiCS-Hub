@@ -104,6 +104,18 @@ export class WorkspaceController {
     return response;
   }
 
+  @Delete('/services/:serviceIdx')
+  @UseGuards(JwtGuard)
+  async handleDeleteService(@Param('serviceIdx') param: string) {
+    const data = await this.workspaceService.handleDeleteService(param);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Delete Command Sent.',
+    };
+    return response;
+  }
+
   @Post('/services/:serviceIdx/redeploy')
   @UseGuards(JwtGuard)
   async handleRedeployService(@Param('serviceIdx') param: string, @Body() body: RedeployService) {

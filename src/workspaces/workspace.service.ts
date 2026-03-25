@@ -206,6 +206,31 @@ export class WorkspaceService {
     return toCamelCase(raw);
   }
 
+  async handleDeleteService(serviceIdx: string) {
+    const rawService = await this.prismaService.services.findFirst({
+      where: { service_index: parseInt(serviceIdx), service_deleted_at: null },
+    });
+    if (!rawService) throw new NotFoundException('Service Not Found.');
+
+    const rawAgent = await this.prismaService.agents.findFirst({
+      where: { agent_index: rawService.service_parent_agent, agent_connection: 'linked', agent_deleted_at: null },
+    });
+    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+
+    await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: { service_deleted_at: new Date() },
+    });
+
+    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+      command: 'DELETE',
+      serviceIndex: rawService.service_index,
+      serviceName: rawService.service_name,
+    });
+
+    return { serviceIndex: rawService.service_index };
+  }
+
   async handleRedeployService(
     serviceIdx: string,
     body: {
