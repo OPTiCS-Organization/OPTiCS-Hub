@@ -1,4 +1,4 @@
-import { IsEnum, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsEnum, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
 import { DeployPreset } from '@prisma/client';
 
 export class RedeployService {
@@ -11,8 +11,7 @@ export class RedeployService {
   servicePort?: number;
 
   @IsOptional()
-  @IsString()
-  serviceSourceUrl?: string;
+  serviceSourceUrl?: string | string[];
 
   @IsOptional()
   @IsString()
