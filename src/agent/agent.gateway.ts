@@ -11,6 +11,7 @@ import { Server, Socket } from 'socket.io';
 import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { AgentService } from './agent.service';
 import { ConsoleGateway } from './console.gateway';
+import log from 'spectra-log';
 
 @Injectable()
 @WebSocketGateway({ namespace: '/agent' })
@@ -18,13 +19,13 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
-  private readonly agentCodeToSocketId = new Map<string, string>();
+  private readonly agentUuidToSocketId = new Map<string, string>();
 
   constructor(
     private readonly agentService: AgentService,
     @Inject(forwardRef(() => ConsoleGateway))
     private readonly consoleGateway: ConsoleGateway,
-  ) {}
+  ) { }
 
   @SubscribeMessage('response')
   handleResponse(@MessageBody() payload: unknown) {
@@ -37,7 +38,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { serviceIndex: number; status: string },
   ) {
     const agentCode = client.data.agentCode as string | undefined;
-    await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
+    const dbStatuses = ['waiting', 'building', 'running', 'stopped', 'failed', 'removed'];
+    if (dbStatuses.includes(payload.status)) {
+      await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
+    }
     this.consoleGateway.server.emit('service-status', { agentCode, ...payload });
   }
 
@@ -54,24 +58,26 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const raw = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = raw === '::1' ? '127.0.0.1' : raw.replace(/^::ffff:/, '');
 
-    const existingCode = (client.handshake.auth as { agentCode?: string })?.agentCode;
-    const agentCode = await this.agentService.registerAgent(ip, existingCode);
+    const agentUuid = (client.handshake.auth as { agentUuid?: string })?.agentUuid;
+    const agent = await this.agentService.registerAgent(ip, agentUuid);
 
-    this.agentCodeToSocketId.set(agentCode.toUpperCase(), client.id);
-    client.data.agentCode = agentCode;
-    client.emit('connected', { agentCode });
+    this.agentUuidToSocketId.set(agent.agentUuid, client.id);
+    client.data.agentCode = agent.agentCode;
+    client.emit('connected', { agent });
   }
 
   handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
+    const agentUuid = (client.handshake.auth as { agentUuid: string }).agentUuid;
+    log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
     if (agentCode) {
-      this.agentCodeToSocketId.delete(agentCode.toUpperCase());
+      this.agentUuidToSocketId.delete(agentUuid);
       void this.agentService.markAgentOffline(agentCode);
     }
   }
 
-  sendToAgent(agentCode: string, event: string, payload: unknown): boolean {
-    const socketId = this.agentCodeToSocketId.get(agentCode.toUpperCase());
+  sendToAgent(agentUuid: string, event: string, payload: unknown): boolean {
+    const socketId = this.agentUuidToSocketId.get(agentUuid);
     if (!socketId) return false;
     this.server.to(socketId).emit(event, payload);
     return true;

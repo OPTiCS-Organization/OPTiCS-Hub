@@ -52,6 +52,8 @@ model agents {
   agent_index            Int              @id @default(autoincrement())
   agent_ip               String
   agent_code             String           @unique
+  agent_uuid             String           @default(uuid())
+  agent_name             String
   agent_parent_workspace Int?
   agent_connection       ConnectionStatus @default(unlinked)
   agent_status           AgentStatus      @default(waiting)
