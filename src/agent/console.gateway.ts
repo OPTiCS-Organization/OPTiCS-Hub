@@ -22,15 +22,15 @@ export class ConsoleGateway {
   // 싸아갈 뭘 해야하지
 
   @SubscribeMessage('command')
-  handleCommand(@MessageBody() payload: { agentCode: string; [key: string]: unknown }) {
-    const { agentCode, ...rest } = payload;
-    this.agentGateway.sendToAgent(agentCode, 'command', rest);
+  handleCommand(@MessageBody() payload: { agentUuid: string; [key: string]: unknown }) {
+    const { agentUuid, ...rest } = payload;
+    this.agentGateway.sendToAgent(agentUuid, 'command', rest);
   }
 
   @SubscribeMessage('subscribe-log')
-  handleSubscribeLog(@MessageBody() payload: { agentCode: string; serviceIndex: number; serviceName: string; deployPreset: string }) {
-  log(`[{{ yellow : bold : Console Gateway }}] subscribe-log | agent=${payload.agentCode} | serviceIndex=${payload.serviceIndex} | name=${payload.serviceName}`);
-    this.agentGateway.sendToAgent(payload.agentCode, 'command', {
+  handleSubscribeLog(@MessageBody() payload: { agentUuid: string; serviceIndex: number; serviceName: string; deployPreset: string }) {
+  log(`[{{ yellow : bold : Console Gateway }}] subscribe-log | agent=${payload.agentUuid} | serviceIndex=${payload.serviceIndex} | name=${payload.serviceName}`);
+    this.agentGateway.sendToAgent(payload.agentUuid, 'command', {
       command: 'STREAM_LOG',
       serviceIndex: payload.serviceIndex,
       serviceName: payload.serviceName,
@@ -39,9 +39,9 @@ export class ConsoleGateway {
   }
 
   @SubscribeMessage('unsubscribe-log')
-  handleUnsubscribeLog(@MessageBody() payload: { agentCode: string; serviceName: string }) {
-    log(`[{{ yellow : bold : Console Gateway }}] unsubscribe-log | agent=${payload.agentCode} | name=${payload.serviceName}`);
-    this.agentGateway.sendToAgent(payload.agentCode, 'command', {
+  handleUnsubscribeLog(@MessageBody() payload: { agentUuid: string; serviceName: string }) {
+    log(`[{{ yellow : bold : Console Gateway }}] unsubscribe-log | agent=${payload.agentUuid} | name=${payload.serviceName}`);
+    this.agentGateway.sendToAgent(payload.agentUuid, 'command', {
       command: 'STOP_LOG',
       serviceName: payload.serviceName,
     });

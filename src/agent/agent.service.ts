@@ -49,38 +49,35 @@ export class AgentService {
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  async registerAgent(ip: string, agentUuid?: string): Promise<{ agentCode: string, agentUuid: string }> {
+  async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string }> {
+    const exist: { agentCode: string | undefined, agentUuid: string | undefined } = { agentCode: undefined, agentUuid: undefined };
     if (agentUuid) {
-      const exist = await this.prismaService.agents.findFirst({
+      const rawTemp = await this.prismaService.agents.update({
         where: {
-          agent_uuid: agentUuid,
+          agent_uuid: agentUuid
+        },
+        data: {
+          agent_status: 'online',
+          agent_ip: ip
         },
       });
-      if (exist) {
-        await this.prismaService.agents.update({
-          where: { agent_code: exist.agent_code },
-          data: {
-            agent_status: 'online',
-            agent_ip: ip
-          },
-        });
-        return { agentCode: exist.agent_code, agentUuid: exist.agent_uuid };
-      }
+      exist.agentCode = rawTemp.agent_code;
+      exist.agentUuid = rawTemp.agent_uuid;
+    } else {
+      const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
+      const agent = await this.prismaService.agents.create({
+        data: {
+          agent_ip: ip,
+          agent_code: agentCode,
+          agent_name: agentCode,
+          agent_connection: 'unlinked',
+          agent_status: 'online',
+        },
+      });
+      exist.agentCode = agent.agent_code;
+      exist.agentUuid = agent.agent_uuid;
     }
-
-    const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
-
-    const agent = await this.prismaService.agents.create({
-      data: {
-        agent_ip: ip,
-        agent_code: agentCode,
-        agent_name: agentCode,
-        agent_connection: 'unlinked',
-        agent_status: 'online',
-      },
-    });
-
-    return { agentCode: agent.agent_code, agentUuid: agent.agent_uuid };
+    return { agentCode: exist.agentCode, agentUuid: exist.agentUuid };
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
@@ -110,6 +107,7 @@ export class AgentService {
       agentCreatedAt: a.agent_created_at,
       agentLastOnline: a.agent_last_online,
       workspaceName: a.parent?.workspace_name ?? null,
+      agentUuid: a.agent_uuid
     }));
   }
 

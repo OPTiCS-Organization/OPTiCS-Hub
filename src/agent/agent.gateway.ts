@@ -54,16 +54,27 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.consoleGateway.server.emit('service-log', { agentCode, ...payload });
   }
 
-  async handleConnection(client: Socket) {
-    const raw = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
-    const ip = raw === '::1' ? '127.0.0.1' : raw.replace(/^::ffff:/, '');
+  /**
+   * 연결 수락 시 일단 IP부터 저장,
+   * Agent가 Validation 이벤트 emit할 때까지 대기
+   * @param client 
+   */
+  async handleConnection() {
+    log('[Agent Gateway] Connection Established', 200, 'INFO')
+  }
 
-    const agentUuid = (client.handshake.auth as { agentUuid?: string })?.agentUuid;
-    const agent = await this.agentService.registerAgent(ip, agentUuid);
+  @SubscribeMessage('register')
+  async handleValidation(client: Socket, payload: { agentUuid: string | null }) {
+    log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
+    log(payload)
+    const rawIp = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
+    const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace(/^::ffff:/, '');
+
+    const agent = await this.agentService.registerAgent(ip, payload.agentUuid);
 
     this.agentUuidToSocketId.set(agent.agentUuid, client.id);
     client.data.agentCode = agent.agentCode;
-    client.emit('connected', { agent });
+    client.emit('register', agent);
   }
 
   handleDisconnect(client: Socket) {

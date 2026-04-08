@@ -136,6 +136,7 @@ export class WorkspaceService {
         agent_connection: true,
         agent_parent_workspace: true,
         agent_ip: true,
+        agent_uuid: true,
       },
       data: {
         agent_connection: 'requested',
@@ -146,7 +147,7 @@ export class WorkspaceService {
       }
     });
 
-    this.agentGateway.sendToAgent(targetAgentCode, 'connect-request', {
+    this.agentGateway.sendToAgent(rawUpdatedAgent.agent_uuid, 'connect-request', {
       workspaceOwnerName,
       workspaceName: rawWorkspace.workspace_name,
       workspaceCreatedAt: rawWorkspace.workspace_created_at,
@@ -176,7 +177,12 @@ export class WorkspaceService {
     if (!workspace) throw new NotFoundException('Workspace Not Found.');
 
     const agent = await this.prismaService.agents.findFirst({
-      where: { agent_index: body.agentIndex, agent_parent_workspace: body.workspaceIdx, agent_connection: 'linked', agent_deleted_at: null },
+      where: {
+        agent_index: body.agentIndex,
+        agent_parent_workspace: body.workspaceIdx,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      },
     });
     if (!agent) throw new NotFoundException('Agent Not Found.');
 
@@ -195,7 +201,7 @@ export class WorkspaceService {
       },
     });
 
-    this.agentGateway.sendToAgent(agent.agent_code, 'command', {
+    this.agentGateway.sendToAgent(agent.agent_uuid, 'command', {
       command: 'DEPLOY',
       serviceIndex: raw.service_index,
       sourceUrl: body.serviceSourceUrl,
@@ -212,21 +218,32 @@ export class WorkspaceService {
 
   async handleDeleteService(serviceIdx: string) {
     const rawService = await this.prismaService.services.findFirst({
-      where: { service_index: parseInt(serviceIdx), service_deleted_at: null },
+      where: {
+        service_index: parseInt(serviceIdx),
+        service_deleted_at: null
+      },
     });
     if (!rawService) throw new NotFoundException('Service Not Found.');
 
     const rawAgent = await this.prismaService.agents.findFirst({
-      where: { agent_index: rawService.service_parent_agent, agent_connection: 'linked', agent_deleted_at: null },
+      where: {
+        agent_index: rawService.service_parent_agent,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      },
     });
     if (!rawAgent) throw new NotFoundException('Agent Not Found.');
 
     await this.prismaService.services.update({
-      where: { service_index: rawService.service_index },
-      data: { service_deleted_at: new Date() },
+      where: {
+        service_index: rawService.service_index
+      },
+      data: {
+        service_deleted_at: new Date()
+      },
     });
 
-    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'DELETE',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
@@ -248,19 +265,30 @@ export class WorkspaceService {
     },
   ) {
     const rawService = await this.prismaService.services.findFirst({
-      where: { service_index: parseInt(serviceIdx), service_deleted_at: null },
+      where: {
+        service_index: parseInt(serviceIdx),
+        service_deleted_at: null,
+      },
     });
     if (!rawService) throw new NotFoundException('Service Not Found.');
 
     const rawAgent = await this.prismaService.agents.findFirst({
-      where: { agent_index: rawService.service_parent_agent, agent_connection: 'linked', agent_deleted_at: null },
+      where: {
+        agent_index: rawService.service_parent_agent,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      },
     });
     if (!rawAgent) throw new NotFoundException('Agent Not Found.');
 
     const newSourceUrl = body.serviceSourceUrl ?? rawService.service_source_url;
     const sourceUrlStored = Array.isArray(newSourceUrl) ? JSON.stringify(newSourceUrl) : newSourceUrl;
     const sourceUrlForAgent = (() => {
-      try { return JSON.parse(rawService.service_source_url) as string | string[]; } catch { return rawService.service_source_url; }
+      try {
+        return JSON.parse(rawService.service_source_url) as string | string[];
+      } catch {
+        return rawService.service_source_url;
+      }
     })();
 
     const updatedService = await this.prismaService.services.update({
@@ -274,7 +302,7 @@ export class WorkspaceService {
       },
     });
 
-    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'REDEPLOY',
       serviceIndex: updatedService.service_index,
       sourceUrl: Array.isArray(newSourceUrl) ? newSourceUrl : sourceUrlForAgent,
@@ -306,7 +334,7 @@ export class WorkspaceService {
     });
     if (!rawAgent) throw new NotFoundException('Agent Not Found.');
 
-    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'START',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
@@ -337,7 +365,7 @@ export class WorkspaceService {
     });
     if (!rawAgent) throw new NotFoundException('Agent Not Found.');
 
-    this.agentGateway.sendToAgent(rawAgent.agent_code, 'command', {
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'STOP',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
@@ -359,7 +387,7 @@ export class WorkspaceService {
 
     const agents = await this.prismaService.agents.findMany({
       where: { agent_parent_workspace: workspaceIdx, agent_connection: 'linked', agent_deleted_at: null },
-      select: { agent_index: true, agent_code: true },
+      select: { agent_index: true, agent_code: true, agent_name: true, agent_uuid: true },
     });
 
     const agentIndexes = agents.map(a => a.agent_index);
@@ -369,7 +397,7 @@ export class WorkspaceService {
       orderBy: { service_created_at: 'desc' },
     });
 
-    const agentCodeMap = new Map(agents.map(a => [a.agent_index, a.agent_code]));
+    const agentMap = new Map(agents.map(a => [a.agent_index, a]));
 
     return rawServices.map(s => ({
       serviceIndex: s.service_index,
@@ -381,7 +409,9 @@ export class WorkspaceService {
       serviceDeployPreset: s.service_deploy_preset,
       serviceCreatedAt: s.service_created_at,
       agentIndex: s.service_parent_agent,
-      agentCode: agentCodeMap.get(s.service_parent_agent) ?? null,
+      agentCode: agentMap.get(s.service_parent_agent)?.agent_code ?? null,
+      agentName: agentMap.get(s.service_parent_agent)?.agent_name ?? null,
+      agentUuid: agentMap.get(s.service_parent_agent)?.agent_uuid ?? null,
     }));
   }
 
