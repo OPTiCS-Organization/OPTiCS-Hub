@@ -49,35 +49,59 @@ export class AgentService {
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string }> {
-    const exist: { agentCode: string | undefined, agentUuid: string | undefined } = { agentCode: undefined, agentUuid: undefined };
-    if (agentUuid) {
-      const rawTemp = await this.prismaService.agents.update({
+  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string }> {
+    const agent: { agentCode: string | undefined, agentUuid: string | undefined } = { agentCode: undefined, agentUuid: undefined };
+    if (agentUuid) { // UUID가 있으면
+      const exist = await this.prismaService.agents.findFirst({
         where: {
-          agent_uuid: agentUuid
+          agent_uuid: agentUuid,
         },
-        data: {
-          agent_status: 'online',
-          agent_ip: ip
-        },
-      });
-      exist.agentCode = rawTemp.agent_code;
-      exist.agentUuid = rawTemp.agent_uuid;
-    } else {
-      const agentCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
-      const agent = await this.prismaService.agents.create({
+        select: {
+          agent_code: true,
+          agent_uuid: true,
+        }
+      })
+      if (exist) { // 일치하는 UUID를 찾으면
+        const updatedAgent = await this.prismaService.agents.update({
+          where: {
+            agent_uuid: agentUuid
+          },
+          data: {
+            agent_status: 'online',
+            agent_ip: ip
+          },
+        });
+        agent.agentCode = updatedAgent.agent_code;
+        agent.agentUuid = updatedAgent.agent_uuid;
+      } else { // 일치하는 UUID를 찾지 못하면
+        const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
+        const newAgent = await this.prismaService.agents.create({
+          data: {
+            agent_ip: ip,
+            agent_code: newCode,
+            agent_name: newCode,
+            agent_connection: 'unlinked',
+            agent_status: 'online',
+          },
+        });
+        agent.agentCode = newAgent.agent_code;
+        agent.agentUuid = newAgent.agent_uuid;
+      }
+    } else { // UUID가 NULL이면
+      const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
+      const newAgent = await this.prismaService.agents.create({
         data: {
           agent_ip: ip,
-          agent_code: agentCode,
-          agent_name: agentCode,
+          agent_code: newCode,
+          agent_name: newCode,
           agent_connection: 'unlinked',
           agent_status: 'online',
         },
       });
-      exist.agentCode = agent.agent_code;
-      exist.agentUuid = agent.agent_uuid;
+      agent.agentCode = newAgent.agent_code;
+      agent.agentUuid = newAgent.agent_uuid;
     }
-    return { agentCode: exist.agentCode, agentUuid: exist.agentUuid };
+    return { agentCode: agent.agentCode, agentUuid: agent.agentUuid };
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
