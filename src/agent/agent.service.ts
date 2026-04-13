@@ -50,7 +50,7 @@ export class AgentService {
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
   public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string }> {
-    const agent: { agentCode: string | undefined, agentUuid: string | undefined } = { agentCode: undefined, agentUuid: undefined };
+    const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp } = { agentCode: undefined, agentUuid: undefined, agentIp: ip };
     if (agentUuid) { // UUID가 있으면
       const exist = await this.prismaService.agents.findFirst({
         where: {

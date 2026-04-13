@@ -17,7 +17,7 @@ import log from 'spectra-log';
 @WebSocketGateway({ namespace: '/agent' })
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly agentUuidToSocketId = new Map<string, string>();
 
