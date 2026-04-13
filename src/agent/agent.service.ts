@@ -49,7 +49,7 @@ export class AgentService {
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string }> {
+  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string, agentIp: string }> {
     const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp } = { agentCode: undefined, agentUuid: undefined, agentIp: ip };
     if (agentUuid) { // UUID가 있으면
       const exist = await this.prismaService.agents.findFirst({
@@ -101,7 +101,7 @@ export class AgentService {
       agent.agentCode = newAgent.agent_code;
       agent.agentUuid = newAgent.agent_uuid;
     }
-    return { agentCode: agent.agentCode, agentUuid: agent.agentUuid };
+    return { agentCode: agent.agentCode, agentUuid: agent.agentUuid, agentIp: agent.agentIp };
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
