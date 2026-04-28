@@ -33,7 +33,7 @@ export class AgentService {
       }
     })
 
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(rawUpdatedAgent.agent_parent_workspace);
     return toCamelCase(rawUpdatedAgent);
   }
 
@@ -49,8 +49,13 @@ export class AgentService {
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string, agentIp: string }> {
-    const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp } = { agentCode: undefined, agentUuid: undefined, agentIp: ip };
+  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string, agentIp: string, agentParentWorkspace: number | null }> {
+    const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp: string, agentParentWorkspace: number | null } = {
+      agentCode: undefined,
+      agentUuid: undefined,
+      agentIp: ip,
+      agentParentWorkspace: null,
+    };
     if (agentUuid) { // UUID가 있으면
       const exist = await this.prismaService.agents.findFirst({
         where: {
@@ -59,6 +64,7 @@ export class AgentService {
         select: {
           agent_code: true,
           agent_uuid: true,
+          agent_parent_workspace: true,
         }
       })
       if (exist) { // 일치하는 UUID를 찾으면
@@ -73,6 +79,7 @@ export class AgentService {
         });
         agent.agentCode = updatedAgent.agent_code;
         agent.agentUuid = updatedAgent.agent_uuid;
+        agent.agentParentWorkspace = updatedAgent.agent_parent_workspace;
       } else { // 일치하는 UUID를 찾지 못하면
         const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
         const newAgent = await this.prismaService.agents.create({
@@ -86,6 +93,7 @@ export class AgentService {
         });
         agent.agentCode = newAgent.agent_code;
         agent.agentUuid = newAgent.agent_uuid;
+        agent.agentParentWorkspace = newAgent.agent_parent_workspace;
       }
     } else { // UUID가 NULL이면
       const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
@@ -100,8 +108,14 @@ export class AgentService {
       });
       agent.agentCode = newAgent.agent_code;
       agent.agentUuid = newAgent.agent_uuid;
+      agent.agentParentWorkspace = newAgent.agent_parent_workspace;
     }
-    return { agentCode: agent.agentCode, agentUuid: agent.agentUuid, agentIp: agent.agentIp };
+    return {
+      agentCode: agent.agentCode,
+      agentUuid: agent.agentUuid,
+      agentIp: agent.agentIp,
+      agentParentWorkspace: agent.agentParentWorkspace,
+    };
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
@@ -143,11 +157,15 @@ export class AgentService {
   }
 
   async markAgentOffline(agentUuid: string): Promise<void> {
+    const agent = await this.prismaService.agents.findFirst({
+      where: { agent_uuid: agentUuid },
+      select: { agent_parent_workspace: true },
+    });
     await this.prismaService.agents.updateMany({
       where: { agent_uuid: agentUuid },
       data: { agent_status: 'offline', agent_last_online: new Date() },
     });
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(agent?.agent_parent_workspace ?? null);
   }
 
   async handleRejectConnectRequest(agentCode: string) {
@@ -172,7 +190,7 @@ export class AgentService {
       }
     })
 
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return toCamelCase(rawUpdatedAgent);
   }
 }

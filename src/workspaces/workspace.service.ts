@@ -212,7 +212,7 @@ export class WorkspaceService {
       env: body.env ?? {},
     });
 
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(body.workspaceIdx);
     return toCamelCase(raw);
   }
 
@@ -343,7 +343,7 @@ export class WorkspaceService {
       deployPreset: rawService.service_deploy_preset,
     });
 
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return { serviceIndex: rawService.service_index };
   }
 
@@ -374,7 +374,7 @@ export class WorkspaceService {
       deployPreset: rawService.service_deploy_preset,
     });
 
-    this.consoleGateway.notifyAgentUpdated();
+    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return { serviceIndex: rawService.service_index };
   }
 

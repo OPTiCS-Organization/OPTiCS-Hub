@@ -12,6 +12,7 @@ import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { AgentService } from './agent.service';
 import { ConsoleGateway } from './console.gateway';
 import log from 'spectra-log';
+import { PrismaService } from 'src/prisma.service';
 
 @Injectable()
 @WebSocketGateway({ namespace: '/agent' })
@@ -20,12 +21,34 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private readonly agentUuidToSocketId = new Map<string, string>();
+  private readonly serviceWorkspaceCache = new Map<number, number>();
 
   constructor(
     private readonly agentService: AgentService,
+    private readonly prismaService: PrismaService,
     @Inject(forwardRef(() => ConsoleGateway))
     private readonly consoleGateway: ConsoleGateway,
   ) { }
+
+  private async getWorkspaceIndexForService(serviceIndex: number): Promise<number | null> {
+    const cached = this.serviceWorkspaceCache.get(serviceIndex);
+    if (cached) return cached;
+
+    const service = await this.prismaService.services.findFirst({
+      where: { service_index: serviceIndex },
+      select: { service_parent_agent: true },
+    });
+    if (!service) return null;
+
+    const agent = await this.prismaService.agents.findFirst({
+      where: { agent_index: service.service_parent_agent },
+      select: { agent_parent_workspace: true },
+    });
+    if (!agent?.agent_parent_workspace) return null;
+
+    this.serviceWorkspaceCache.set(serviceIndex, agent.agent_parent_workspace);
+    return agent.agent_parent_workspace;
+  }
 
   @SubscribeMessage('response')
   handleResponse(@MessageBody() payload: unknown) {
@@ -38,20 +61,30 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { serviceIndex: number; status: string },
   ) {
     const agentCode = client.data.agentCode as string | undefined;
+    const workspaceIndex =
+      (client.data.workspaceIndex as number | null | undefined)
+      ?? await this.getWorkspaceIndexForService(payload.serviceIndex);
     const dbStatuses = ['waiting', 'building', 'running', 'stopped', 'failed', 'removed'];
     if (dbStatuses.includes(payload.status)) {
       await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
     }
-    this.consoleGateway.server.emit('service-status', { agentCode, ...payload });
+    if (workspaceIndex) {
+      this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-status', { agentCode, ...payload });
+    }
   }
 
   @SubscribeMessage('service-log')
-  handleServiceLog(
+  async handleServiceLog(
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { serviceIndex: number; log: string; timestamp?: string },
   ) {
     const agentCode = client.data.agentCode as string | undefined;
-    this.consoleGateway.server.emit('service-log', { agentCode, ...payload });
+    const workspaceIndex =
+      (client.data.workspaceIndex as number | null | undefined)
+      ?? await this.getWorkspaceIndexForService(payload.serviceIndex);
+    if (workspaceIndex) {
+      this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-log', { agentCode, ...payload });
+    }
   }
 
   /**
@@ -74,16 +107,18 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     this.agentUuidToSocketId.set(agent.agentUuid, client.id);
     client.data.agentCode = agent.agentCode;
+    client.data.agentUuid = agent.agentUuid;
+    client.data.workspaceIndex = agent.agentParentWorkspace;
     client.emit('register', agent);
   }
 
   handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
-    const agentUuid = (client.handshake.auth as { agentUuid: string }).agentUuid;
+    const agentUuid = (client.data.agentUuid as string | undefined) ?? (client.handshake.auth as { agentUuid?: string }).agentUuid;
     log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
-    if (agentCode) {
+    if (agentCode && agentUuid) {
       this.agentUuidToSocketId.delete(agentUuid);
-      void this.agentService.markAgentOffline(agentCode);
+      void this.agentService.markAgentOffline(agentUuid);
     }
   }
 
