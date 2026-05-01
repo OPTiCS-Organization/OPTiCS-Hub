@@ -21,8 +21,6 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private readonly agentUuidToSocketId = new Map<string, string>();
-  private readonly serviceWorkspaceCache = new Map<number, number>();
-
   constructor(
     private readonly agentService: AgentService,
     private readonly prismaService: PrismaService,
@@ -30,29 +28,35 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly consoleGateway: ConsoleGateway,
   ) { }
 
-  private async getWorkspaceIndexForService(serviceIndex: number): Promise<number | null> {
-    const cached = this.serviceWorkspaceCache.get(serviceIndex);
-    if (cached) return cached;
-
+  private async getWorkspaceIndexForAgentService(agentUuid: string, serviceIndex: number): Promise<number | null> {
     const service = await this.prismaService.services.findFirst({
-      where: { service_index: serviceIndex },
+      where: { service_index: serviceIndex, service_deleted_at: null },
       select: { service_parent_agent: true },
     });
     if (!service) return null;
 
     const agent = await this.prismaService.agents.findFirst({
-      where: { agent_index: service.service_parent_agent },
+      where: {
+        agent_index: service.service_parent_agent,
+        agent_uuid: agentUuid,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      },
       select: { agent_parent_workspace: true },
     });
     if (!agent?.agent_parent_workspace) return null;
 
-    this.serviceWorkspaceCache.set(serviceIndex, agent.agent_parent_workspace);
     return agent.agent_parent_workspace;
   }
 
   @SubscribeMessage('response')
-  handleResponse(@MessageBody() payload: unknown) {
-    this.consoleGateway.server.emit('response', payload);
+  handleResponse(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: unknown,
+  ) {
+    const workspaceIndex = client.data.workspaceIndex as number | null | undefined;
+    if (!workspaceIndex) return;
+    this.consoleGateway.emitToWorkspace(workspaceIndex, 'response', payload as object);
   }
 
   @SubscribeMessage('service-status')
@@ -61,9 +65,11 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { serviceIndex: number; status: string },
   ) {
     const agentCode = client.data.agentCode as string | undefined;
-    const workspaceIndex =
-      (client.data.workspaceIndex as number | null | undefined)
-      ?? await this.getWorkspaceIndexForService(payload.serviceIndex);
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
+    if (!workspaceIndex) return;
+
     const dbStatuses = ['waiting', 'building', 'running', 'stopped', 'failed', 'removed'];
     if (dbStatuses.includes(payload.status)) {
       await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
@@ -79,9 +85,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @MessageBody() payload: { serviceIndex: number; log: string; timestamp?: string },
   ) {
     const agentCode = client.data.agentCode as string | undefined;
-    const workspaceIndex =
-      (client.data.workspaceIndex as number | null | undefined)
-      ?? await this.getWorkspaceIndexForService(payload.serviceIndex);
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
     if (workspaceIndex) {
       this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-log', { agentCode, ...payload });
     }

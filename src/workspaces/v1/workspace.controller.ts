@@ -106,8 +106,8 @@ export class WorkspaceController {
 
   @Delete('/services/:serviceIdx')
   @UseGuards(JwtGuard)
-  async handleDeleteService(@Param('serviceIdx') param: string) {
-    const data = await this.workspaceService.handleDeleteService(param);
+  async handleDeleteService(@Request() request: any, @Param('serviceIdx') param: string) {
+    const data = await this.workspaceService.handleDeleteService(request.user.userIndex, param);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: { service: data },
@@ -118,8 +118,8 @@ export class WorkspaceController {
 
   @Post('/services/:serviceIdx/redeploy')
   @UseGuards(JwtGuard)
-  async handleRedeployService(@Param('serviceIdx') param: string, @Body() body: RedeployService) {
-    const data = await this.workspaceService.handleRedeployService(param, body);
+  async handleRedeployService(@Request() request: any, @Param('serviceIdx') param: string, @Body() body: RedeployService) {
+    const data = await this.workspaceService.handleRedeployService(request.user.userIndex, param, body);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: { service: data },
@@ -131,7 +131,7 @@ export class WorkspaceController {
   @Post('/services/:serviceIdx/start')
   @UseGuards(JwtGuard)
   async handleStartService(@Request() request: any, @Param('serviceIdx') param: string) {
-    const data = await this.workspaceService.handleStartService(param)
+    const data = await this.workspaceService.handleStartService(request.user.userIndex, param)
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -144,8 +144,8 @@ export class WorkspaceController {
 
   @Post('/services/:serviceIdx/stop')
   @UseGuards(JwtGuard)
-  async handleStopService(@Param('serviceIdx') param: string) {
-    const data = await this.workspaceService.handleStopService(param)
+  async handleStopService(@Request() request: any, @Param('serviceIdx') param: string) {
+    const data = await this.workspaceService.handleStopService(request.user.userIndex, param)
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {

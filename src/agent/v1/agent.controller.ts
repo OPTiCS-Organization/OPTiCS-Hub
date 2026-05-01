@@ -25,7 +25,7 @@ export class AgentController {
 
   @Post('/connect/accept')
   async handleAcceptConnectRequest(@Body() body: HandleConnectRequest) {
-    await this.agentService.handleAcceptConnectRequest(body.agentCode);
+    await this.agentService.handleAcceptConnectRequest(body.agentCode, body.agentUuid);
 
     const response: GlobalResponse = {
       code: Code.Agent.REQUEST.CONNECTED,
@@ -38,7 +38,7 @@ export class AgentController {
 
   @Post('/connect/reject')
   async handleRejectConnectionRequest(@Body() body: HandleConnectRequest) {
-    await this.agentService.handleRejectConnectRequest(body.agentCode);
+    await this.agentService.handleRejectConnectRequest(body.agentCode, body.agentUuid);
 
     const response: GlobalResponse = {
       code: Code.Agent.REQUEST.CONNECTED,

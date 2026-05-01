@@ -68,7 +68,10 @@ model services {
   service_index         Int           @id @default(autoincrement())
   service_name          String
   service_port          Int
+  service_container_port Int?
+  service_host_port     Int?
   service_source_url    String
+  service_root_directory String?
   service_parent_agent  Int
   service_status        ServiceStatus @default(waiting)
   service_version       String

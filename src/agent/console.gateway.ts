@@ -78,6 +78,62 @@ export class ConsoleGateway implements OnGatewayConnection {
     return Boolean(workspace);
   }
 
+  private async canAccessAgent(client: Socket, agentUuid: string, workspaceIndex?: number): Promise<boolean> {
+    const userIndex = client.data.userIndex as number | undefined;
+    if (!userIndex || !agentUuid) return false;
+    const agent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_uuid: agentUuid,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: userIndex,
+          workspace_deleted_at: null,
+          ...(workspaceIndex ? { workspace_index: workspaceIndex } : {}),
+        },
+      },
+      select: { agent_index: true },
+    });
+    return Boolean(agent);
+  }
+
+  private async canAccessService(
+    client: Socket,
+    workspaceIndex: number,
+    agentUuid: string,
+    serviceIndex: number,
+  ): Promise<boolean> {
+    const userIndex = client.data.userIndex as number | undefined;
+    if (!userIndex || !Number.isFinite(workspaceIndex) || !Number.isFinite(serviceIndex) || !agentUuid) {
+      return false;
+    }
+
+    const service = await this.prismaService.services.findFirst({
+      where: {
+        service_index: serviceIndex,
+        service_deleted_at: null,
+      },
+      select: { service_parent_agent: true },
+    });
+    if (!service) return false;
+
+    const agent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_index: service.service_parent_agent,
+        agent_uuid: agentUuid,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+        parent: {
+          workspace_index: workspaceIndex,
+          workspace_owner: userIndex,
+          workspace_deleted_at: null,
+        },
+      },
+      select: { agent_index: true },
+    });
+    return Boolean(agent);
+  }
+
   @SubscribeMessage('subscribe-workspace')
   async handleSubscribeWorkspace(
     @ConnectedSocket() client: Socket,
@@ -88,13 +144,17 @@ export class ConsoleGateway implements OnGatewayConnection {
     await client.join(this.workspaceRoom(workspaceIndex));
   }
 
-  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log', payload?: object) {
+  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'response', payload?: object) {
     this.server.to(this.workspaceRoom(workspaceIndex)).emit(event, payload);
   }
 
   @SubscribeMessage('command')
-  handleCommand(@MessageBody() payload: { agentUuid: string; [key: string]: unknown }) {
+  async handleCommand(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { agentUuid: string; [key: string]: unknown },
+  ) {
     const { agentUuid, ...rest } = payload;
+    if (!(await this.canAccessAgent(client, agentUuid))) return;
     this.agentGateway.sendToAgent(agentUuid, 'command', rest);
   }
 
@@ -104,7 +164,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     @MessageBody() payload: { workspaceIndex: number; agentUuid: string; serviceIndex: number; serviceName: string; deployPreset: string },
   ) {
     const workspaceIndex = Number(payload.workspaceIndex);
-    if (!(await this.canAccessWorkspace(client, workspaceIndex))) return;
+    if (!(await this.canAccessService(client, workspaceIndex, payload.agentUuid, Number(payload.serviceIndex)))) return;
     await client.join(this.workspaceRoom(workspaceIndex));
     log(`[{{ yellow : bold : Console Gateway }}] subscribe-log | agent=${payload.agentUuid} | serviceIndex=${payload.serviceIndex} | name=${payload.serviceName}`);
     this.agentGateway.sendToAgent(payload.agentUuid, 'command', {
@@ -120,7 +180,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: { workspaceIndex: number; agentUuid: string; serviceName: string },
   ) {
-    if (!(await this.canAccessWorkspace(client, Number(payload.workspaceIndex)))) return;
+    if (!(await this.canAccessAgent(client, payload.agentUuid, Number(payload.workspaceIndex)))) return;
     log(`[{{ yellow : bold : Console Gateway }}] unsubscribe-log | agent=${payload.agentUuid} | name=${payload.serviceName}`);
     this.agentGateway.sendToAgent(payload.agentUuid, 'command', {
       command: 'STOP_LOG',

@@ -12,11 +12,12 @@ export class AgentService {
     private readonly consoleGateway: ConsoleGateway,
   ) { };
 
-  async handleAcceptConnectRequest(agentCode: string) {
+  async handleAcceptConnectRequest(agentCode: string, agentUuid: string) {
     log('Accept')
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
         agent_code: agentCode,
+        agent_uuid: agentUuid,
         agent_connection: 'requested',
       }
     });
@@ -26,6 +27,7 @@ export class AgentService {
     const rawUpdatedAgent = await this.prismaService.agents.update({
       where: {
         agent_code: agentCode,
+        agent_uuid: agentUuid,
         agent_connection: 'requested',
       },
       data: {
@@ -168,11 +170,12 @@ export class AgentService {
     this.consoleGateway.notifyWorkspaceUpdated(agent?.agent_parent_workspace ?? null);
   }
 
-  async handleRejectConnectRequest(agentCode: string) {
+  async handleRejectConnectRequest(agentCode: string, agentUuid: string) {
     log('Rejecting')
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
         agent_code: agentCode,
+        agent_uuid: agentUuid,
         agent_connection: 'requested',
       }
     });
@@ -182,6 +185,7 @@ export class AgentService {
     const rawUpdatedAgent = await this.prismaService.agents.update({
       where: {
         agent_code: agentCode,
+        agent_uuid: agentUuid,
         agent_connection: 'requested',
       },
       data: {

@@ -1,4 +1,4 @@
-import { ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
 import log from 'spectra-log';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
@@ -16,6 +16,40 @@ export class WorkspaceService {
 
   handleHeartbeat(data) {
     log(data);
+  }
+
+  private parseServiceIndex(serviceIdx: string) {
+    const parsed = Number(serviceIdx);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      throw new BadRequestException('Invalid Service Index.');
+    }
+    return parsed;
+  }
+
+  private async findOwnedServiceAndAgent(owner: number, serviceIdx: string) {
+    const serviceIndex = this.parseServiceIndex(serviceIdx);
+    const rawService = await this.prismaService.services.findFirst({
+      where: {
+        service_index: serviceIndex,
+        service_deleted_at: null,
+      },
+    });
+    if (!rawService) throw new NotFoundException('Service Not Found.');
+
+    const rawAgent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_index: rawService.service_parent_agent,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: owner,
+          workspace_deleted_at: null,
+        },
+      },
+    });
+    if (!rawAgent) throw new NotFoundException('Service Not Found.');
+
+    return { rawService, rawAgent };
   }
 
   async handleCreateWorkspace(owner: number, workspaceName: string | undefined) {
@@ -164,7 +198,10 @@ export class WorkspaceService {
       workspaceIdx: number,
       serviceName: string;
       servicePort: number;
+      serviceContainerPort?: number;
+      serviceHostPort?: number;
       serviceSourceUrl: string | string[];
+      serviceRootDirectory?: string;
       serviceVersion: string;
       serviceDeployPreset: DeployPreset;
       agentIndex: number;
@@ -189,12 +226,18 @@ export class WorkspaceService {
     const sourceUrlStored = Array.isArray(body.serviceSourceUrl)
       ? JSON.stringify(body.serviceSourceUrl)
       : body.serviceSourceUrl;
+    const hostPort = body.serviceHostPort ?? body.servicePort;
+    const containerPort = body.serviceContainerPort ?? body.servicePort;
+    const rootDirectory = body.serviceRootDirectory?.trim() || null;
 
     const raw = await this.prismaService.services.create({
       data: {
         service_name: body.serviceName,
-        service_port: body.servicePort,
+        service_port: hostPort,
+        service_host_port: hostPort,
+        service_container_port: containerPort,
         service_source_url: sourceUrlStored,
+        service_root_directory: rootDirectory,
         service_version: body.serviceVersion,
         service_deploy_preset: body.serviceDeployPreset as any,
         service_parent_agent: body.agentIndex,
@@ -205,9 +248,12 @@ export class WorkspaceService {
       command: 'DEPLOY',
       serviceIndex: raw.service_index,
       sourceUrl: body.serviceSourceUrl,
+      rootDirectory,
       deployPreset: body.serviceDeployPreset,
       serviceName: body.serviceName,
-      servicePort: body.servicePort,
+      servicePort: hostPort,
+      serviceHostPort: hostPort,
+      serviceContainerPort: containerPort,
       serviceVersion: body.serviceVersion,
       env: body.env ?? {},
     });
@@ -216,23 +262,8 @@ export class WorkspaceService {
     return toCamelCase(raw);
   }
 
-  async handleDeleteService(serviceIdx: string) {
-    const rawService = await this.prismaService.services.findFirst({
-      where: {
-        service_index: parseInt(serviceIdx),
-        service_deleted_at: null
-      },
-    });
-    if (!rawService) throw new NotFoundException('Service Not Found.');
-
-    const rawAgent = await this.prismaService.agents.findFirst({
-      where: {
-        agent_index: rawService.service_parent_agent,
-        agent_connection: 'linked',
-        agent_deleted_at: null,
-      },
-    });
-    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+  async handleDeleteService(owner: number, serviceIdx: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
     await this.prismaService.services.update({
       where: {
@@ -254,49 +285,46 @@ export class WorkspaceService {
   }
 
   async handleRedeployService(
+    owner: number,
     serviceIdx: string,
     body: {
       serviceName?: string;
       servicePort?: number;
+      serviceContainerPort?: number;
+      serviceHostPort?: number;
       serviceSourceUrl?: string | string[];
+      serviceRootDirectory?: string;
       serviceVersion?: string;
       serviceDeployPreset?: DeployPreset;
       env?: Record<string, string>;
     },
   ) {
-    const rawService = await this.prismaService.services.findFirst({
-      where: {
-        service_index: parseInt(serviceIdx),
-        service_deleted_at: null,
-      },
-    });
-    if (!rawService) throw new NotFoundException('Service Not Found.');
-
-    const rawAgent = await this.prismaService.agents.findFirst({
-      where: {
-        agent_index: rawService.service_parent_agent,
-        agent_connection: 'linked',
-        agent_deleted_at: null,
-      },
-    });
-    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
     const newSourceUrl = body.serviceSourceUrl ?? rawService.service_source_url;
     const sourceUrlStored = Array.isArray(newSourceUrl) ? JSON.stringify(newSourceUrl) : newSourceUrl;
     const sourceUrlForAgent = (() => {
       try {
-        return JSON.parse(rawService.service_source_url) as string | string[];
+        return JSON.parse(sourceUrlStored) as string | string[];
       } catch {
-        return rawService.service_source_url;
+        return sourceUrlStored;
       }
     })();
+    const hostPort = body.serviceHostPort ?? body.servicePort ?? rawService.service_host_port ?? rawService.service_port;
+    const containerPort = body.serviceContainerPort ?? rawService.service_container_port ?? rawService.service_port;
+    const rootDirectory = body.serviceRootDirectory !== undefined
+      ? (body.serviceRootDirectory.trim() || null)
+      : rawService.service_root_directory;
 
     const updatedService = await this.prismaService.services.update({
       where: { service_index: rawService.service_index },
       data: {
         service_name: body.serviceName ?? rawService.service_name,
-        service_port: body.servicePort ?? rawService.service_port,
+        service_port: hostPort,
+        service_host_port: hostPort,
+        service_container_port: containerPort,
         service_source_url: sourceUrlStored,
+        service_root_directory: rootDirectory,
         service_version: body.serviceVersion ?? rawService.service_version,
         service_deploy_preset: (body.serviceDeployPreset ?? rawService.service_deploy_preset) as any,
       },
@@ -305,10 +333,13 @@ export class WorkspaceService {
     this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'REDEPLOY',
       serviceIndex: updatedService.service_index,
-      sourceUrl: Array.isArray(newSourceUrl) ? newSourceUrl : sourceUrlForAgent,
+      sourceUrl: sourceUrlForAgent,
+      rootDirectory,
       deployPreset: updatedService.service_deploy_preset,
       serviceName: updatedService.service_name,
-      servicePort: updatedService.service_port,
+      servicePort: updatedService.service_host_port ?? updatedService.service_port,
+      serviceHostPort: updatedService.service_host_port ?? updatedService.service_port,
+      serviceContainerPort: updatedService.service_container_port ?? updatedService.service_port,
       serviceVersion: updatedService.service_version,
       env: body.env ?? {},
     });
@@ -316,29 +347,16 @@ export class WorkspaceService {
     return toCamelCase(updatedService);
   }
 
-  async handleStartService(serviceIdx: string) {
-    const rawService = await this.prismaService.services.findFirst({
-      where: {
-        service_index: parseInt(serviceIdx),
-        service_deleted_at: null,
-      }
-    });
-    if (!rawService) throw new NotFoundException('Service Not Found.');
-
-    const rawAgent = await this.prismaService.agents.findFirst({
-      where: {
-        agent_index: rawService.service_parent_agent,
-        agent_connection: 'linked',
-        agent_deleted_at: null,
-      }
-    });
-    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+  async handleStartService(owner: number, serviceIdx: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
     this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'START',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
-      servicePort: rawService.service_port,
+      servicePort: rawService.service_host_port ?? rawService.service_port,
+      serviceHostPort: rawService.service_host_port ?? rawService.service_port,
+      serviceContainerPort: rawService.service_container_port ?? rawService.service_port,
       serviceVersion: rawService.service_version,
       deployPreset: rawService.service_deploy_preset,
     });
@@ -347,29 +365,16 @@ export class WorkspaceService {
     return { serviceIndex: rawService.service_index };
   }
 
-  async handleStopService(serviceIdx: string) {
-    const rawService = await this.prismaService.services.findFirst({
-      where: {
-        service_index: parseInt(serviceIdx),
-        service_deleted_at: null,
-      }
-    });
-    if (!rawService) throw new NotFoundException('Service Not Found.');
-
-    const rawAgent = await this.prismaService.agents.findFirst({
-      where: {
-        agent_index: rawService.service_parent_agent,
-        agent_connection: 'linked',
-        agent_deleted_at: null,
-      }
-    });
-    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+  async handleStopService(owner: number, serviceIdx: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
     this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'STOP',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
-      servicePort: rawService.service_port,
+      servicePort: rawService.service_host_port ?? rawService.service_port,
+      serviceHostPort: rawService.service_host_port ?? rawService.service_port,
+      serviceContainerPort: rawService.service_container_port ?? rawService.service_port,
       serviceVersion: rawService.service_version,
       deployPreset: rawService.service_deploy_preset,
     });
@@ -403,7 +408,10 @@ export class WorkspaceService {
       serviceIndex: s.service_index,
       serviceName: s.service_name,
       servicePort: s.service_port,
+      serviceHostPort: s.service_host_port ?? s.service_port,
+      serviceContainerPort: s.service_container_port ?? s.service_port,
       serviceSourceUrl: s.service_source_url,
+      serviceRootDirectory: s.service_root_directory,
       serviceStatus: s.service_status,
       serviceVersion: s.service_version,
       serviceDeployPreset: s.service_deploy_preset,

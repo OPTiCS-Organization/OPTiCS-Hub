@@ -11,7 +11,19 @@ export class RedeployService {
   servicePort?: number;
 
   @IsOptional()
+  @IsNumber()
+  serviceContainerPort?: number;
+
+  @IsOptional()
+  @IsNumber()
+  serviceHostPort?: number;
+
+  @IsOptional()
   serviceSourceUrl?: string | string[];
+
+  @IsOptional()
+  @IsString()
+  serviceRootDirectory?: string;
 
   @IsOptional()
   @IsString()
