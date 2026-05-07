@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, GoneException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import log from 'spectra-log';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
@@ -50,6 +50,12 @@ export class WorkspaceService {
     if (!rawAgent) throw new NotFoundException('Service Not Found.');
 
     return { rawService, rawAgent };
+  }
+
+  private ensureCommandSent(sent: boolean) {
+    if (!sent) {
+      throw new ServiceUnavailableException('Agent is not connected.');
+    }
   }
 
   async handleCreateWorkspace(owner: number, workspaceName: string | undefined) {
@@ -223,6 +229,17 @@ export class WorkspaceService {
     });
     if (!agent) throw new NotFoundException('Agent Not Found.');
 
+    const duplicatedService = await this.prismaService.services.findFirst({
+      where: {
+        service_parent_agent: body.agentIndex,
+        service_name: body.serviceName,
+        service_deleted_at: null,
+        service_status: { not: 'removed' },
+      },
+      select: { service_index: true },
+    });
+    if (duplicatedService) throw new ConflictException('Service Name Already Exists on This Agent.');
+
     const sourceUrlStored = Array.isArray(body.serviceSourceUrl)
       ? JSON.stringify(body.serviceSourceUrl)
       : body.serviceSourceUrl;
@@ -244,7 +261,7 @@ export class WorkspaceService {
       },
     });
 
-    this.agentGateway.sendToAgent(agent.agent_uuid, 'command', {
+    const sent = this.agentGateway.sendToAgent(agent.agent_uuid, 'command', {
       command: 'DEPLOY',
       serviceIndex: raw.service_index,
       sourceUrl: body.serviceSourceUrl,
@@ -257,6 +274,14 @@ export class WorkspaceService {
       serviceVersion: body.serviceVersion,
       env: body.env ?? {},
     });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: raw.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(body.workspaceIdx);
+      this.ensureCommandSent(sent);
+    }
 
     this.consoleGateway.notifyWorkspaceUpdated(body.workspaceIdx);
     return toCamelCase(raw);
@@ -265,21 +290,19 @@ export class WorkspaceService {
   async handleDeleteService(owner: number, serviceIdx: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
-    await this.prismaService.services.update({
-      where: {
-        service_index: rawService.service_index
-      },
-      data: {
-        service_deleted_at: new Date()
-      },
-    });
-
-    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'DELETE',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
       deployPreset: rawService.service_deploy_preset,
     });
+    this.ensureCommandSent(sent);
+
+    await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: { service_status: 'removed' },
+    });
+    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
 
     return { serviceIndex: rawService.service_index };
   }
@@ -316,6 +339,20 @@ export class WorkspaceService {
       ? (body.serviceRootDirectory.trim() || null)
       : rawService.service_root_directory;
 
+    if (body.serviceName && body.serviceName !== rawService.service_name) {
+      const duplicatedService = await this.prismaService.services.findFirst({
+        where: {
+          service_parent_agent: rawService.service_parent_agent,
+          service_name: body.serviceName,
+          service_deleted_at: null,
+          service_status: { not: 'removed' },
+          service_index: { not: rawService.service_index },
+        },
+        select: { service_index: true },
+      });
+      if (duplicatedService) throw new ConflictException('Service Name Already Exists on This Agent.');
+    }
+
     const updatedService = await this.prismaService.services.update({
       where: { service_index: rawService.service_index },
       data: {
@@ -330,7 +367,7 @@ export class WorkspaceService {
       },
     });
 
-    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'REDEPLOY',
       serviceIndex: updatedService.service_index,
       sourceUrl: sourceUrlForAgent,
@@ -343,6 +380,14 @@ export class WorkspaceService {
       serviceVersion: updatedService.service_version,
       env: body.env ?? {},
     });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: updatedService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
 
     return toCamelCase(updatedService);
   }
@@ -350,7 +395,7 @@ export class WorkspaceService {
   async handleStartService(owner: number, serviceIdx: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
-    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'START',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
@@ -360,6 +405,14 @@ export class WorkspaceService {
       serviceVersion: rawService.service_version,
       deployPreset: rawService.service_deploy_preset,
     });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: rawService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
 
     this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return { serviceIndex: rawService.service_index };
@@ -368,7 +421,7 @@ export class WorkspaceService {
   async handleStopService(owner: number, serviceIdx: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
 
-    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'STOP',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
@@ -378,6 +431,14 @@ export class WorkspaceService {
       serviceVersion: rawService.service_version,
       deployPreset: rawService.service_deploy_preset,
     });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: rawService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
 
     this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return { serviceIndex: rawService.service_index };
