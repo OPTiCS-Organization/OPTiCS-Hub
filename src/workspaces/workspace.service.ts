@@ -4,7 +4,7 @@ import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
 import { AgentGateway } from 'src/agent/agent.gateway';
 import { ConsoleGateway } from 'src/agent/console.gateway';
-import { DeployPreset } from '@prisma/client';
+import { DeployPreset, Prisma } from '@prisma/client';
 
 @Injectable()
 export class WorkspaceService {
@@ -56,6 +56,13 @@ export class WorkspaceService {
     if (!sent) {
       throw new ServiceUnavailableException('Agent is not connected.');
     }
+  }
+
+  private normalizeEnv(env: unknown): Record<string, string> {
+    if (!env || typeof env !== 'object' || Array.isArray(env)) return {};
+    return Object.fromEntries(
+      Object.entries(env).map(([key, value]) => [key, String(value)]),
+    );
   }
 
   async handleCreateWorkspace(owner: number, workspaceName: string | undefined) {
@@ -246,6 +253,7 @@ export class WorkspaceService {
     const hostPort = body.serviceHostPort ?? body.servicePort;
     const containerPort = body.serviceContainerPort ?? body.servicePort;
     const rootDirectory = body.serviceRootDirectory?.trim() || null;
+    const env = this.normalizeEnv(body.env);
 
     const raw = await this.prismaService.services.create({
       data: {
@@ -255,6 +263,7 @@ export class WorkspaceService {
         service_container_port: containerPort,
         service_source_url: sourceUrlStored,
         service_root_directory: rootDirectory,
+        service_env: env as Prisma.InputJsonObject,
         service_version: body.serviceVersion,
         service_deploy_preset: body.serviceDeployPreset as any,
         service_parent_agent: body.agentIndex,
@@ -272,7 +281,7 @@ export class WorkspaceService {
       serviceHostPort: hostPort,
       serviceContainerPort: containerPort,
       serviceVersion: body.serviceVersion,
-      env: body.env ?? {},
+      env,
     });
     if (!sent) {
       await this.prismaService.services.update({
@@ -338,6 +347,9 @@ export class WorkspaceService {
     const rootDirectory = body.serviceRootDirectory !== undefined
       ? (body.serviceRootDirectory.trim() || null)
       : rawService.service_root_directory;
+    const env = body.env !== undefined
+      ? this.normalizeEnv(body.env)
+      : this.normalizeEnv(rawService.service_env);
 
     if (body.serviceName && body.serviceName !== rawService.service_name) {
       const duplicatedService = await this.prismaService.services.findFirst({
@@ -362,6 +374,7 @@ export class WorkspaceService {
         service_container_port: containerPort,
         service_source_url: sourceUrlStored,
         service_root_directory: rootDirectory,
+        service_env: env as Prisma.InputJsonObject,
         service_version: body.serviceVersion ?? rawService.service_version,
         service_deploy_preset: (body.serviceDeployPreset ?? rawService.service_deploy_preset) as any,
       },
@@ -378,7 +391,7 @@ export class WorkspaceService {
       serviceHostPort: updatedService.service_host_port ?? updatedService.service_port,
       serviceContainerPort: updatedService.service_container_port ?? updatedService.service_port,
       serviceVersion: updatedService.service_version,
-      env: body.env ?? {},
+      env,
     });
     if (!sent) {
       await this.prismaService.services.update({
@@ -473,6 +486,7 @@ export class WorkspaceService {
       serviceContainerPort: s.service_container_port ?? s.service_port,
       serviceSourceUrl: s.service_source_url,
       serviceRootDirectory: s.service_root_directory,
+      serviceEnv: this.normalizeEnv(s.service_env),
       serviceStatus: s.service_status,
       serviceVersion: s.service_version,
       serviceDeployPreset: s.service_deploy_preset,

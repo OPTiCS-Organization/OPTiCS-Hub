@@ -72,6 +72,7 @@ model services {
   service_host_port     Int?
   service_source_url    String
   service_root_directory String?
+  service_env           Json?
   service_parent_agent  Int
   service_status        ServiceStatus @default(waiting)
   service_version       String
