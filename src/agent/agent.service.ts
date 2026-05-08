@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { toCamelCase } from 'src/global/utils/toCamelCase';
 import { PrismaService } from 'src/prisma.service';
 import { generate } from 'random-words';
@@ -6,11 +6,18 @@ import log from 'spectra-log';
 import { ConsoleGateway } from './console.gateway';
 
 @Injectable()
-export class AgentService {
+export class AgentService implements OnModuleInit {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly consoleGateway: ConsoleGateway,
   ) { };
+
+  async onModuleInit() {
+    await this.prismaService.agents.updateMany({
+      where: { agent_deleted_at: null },
+      data: { agent_status: 'offline', agent_last_online: new Date() },
+    });
+  }
 
   async handleAcceptConnectRequest(agentCode: string, agentUuid: string) {
     log('Accept')
@@ -163,10 +170,21 @@ export class AgentService {
       where: { agent_uuid: agentUuid },
       select: { agent_parent_workspace: true },
     });
-    await this.prismaService.agents.updateMany({
+    const updateOffline = () => this.prismaService.agents.updateMany({
       where: { agent_uuid: agentUuid },
       data: { agent_status: 'offline', agent_last_online: new Date() },
     });
+    try {
+      await updateOffline();
+    } catch {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      try {
+        await updateOffline();
+      } catch (error) {
+        log(`[Agent Service] Failed to mark agent offline: ${agentUuid}`, 500, 'ERROR');
+        log(error);
+      }
+    }
     this.consoleGateway.notifyWorkspaceUpdated(agent?.agent_parent_workspace ?? null);
   }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
 import { WorkspaceService } from '../workspace.service';
 import { JwtGuard } from 'src/auth/interceptor/guard/jwt.guard';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
@@ -92,6 +92,34 @@ export class WorkspaceController {
     return response;
   }
 
+  @Delete(':workspaceIdx/agent/:agentCode/disconnect')
+  @UseGuards(JwtGuard)
+  async handleDisconnectAgent(@Request() request: any, @Param('workspaceIdx') workspaceIdx: string, @Param('agentCode') agentCode: string) {
+    const data = await this.workspaceService.disconnectWorkspaceAgent(request.user.userIndex, parseInt(workspaceIdx), agentCode);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        data
+      },
+      message: 'Agent Disconnected Successfully.',
+    };
+    return response;
+  }
+
+  @Delete(':workspaceIdx/agent/:agentCode/cancel')
+  @UseGuards(JwtGuard)
+  async handleCancelAgentConnectionRequest(@Request() request: any, @Param('workspaceIdx') workspaceIdx: string, @Param('agentCode') agentCode: string) {
+    const data = await this.workspaceService.cancelWorkspaceAgentConnectionRequest(request.user.userIndex, parseInt(workspaceIdx), agentCode);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        data
+      },
+      message: 'Agent Connection Request Cancelled Successfully.',
+    };
+    return response;
+  }
+
   @Post('/services/deploy')
   @UseGuards(JwtGuard)
   async handleCreateService(@Request() request: any, @Body() body: any) {
@@ -152,6 +180,48 @@ export class WorkspaceController {
         service: data,
       },
       message: 'Server Stop Command Sent.'
+    }
+    return response;
+  }
+
+  @Post('/services/:serviceIdx/containers/:containerName/start')
+  @UseGuards(JwtGuard)
+  async handleStartContainer(@Request() request: any, @Param('serviceIdx') serviceIdx: string, @Param('containerName') containerName: string) {
+    const data = await this.workspaceService.handleStartContainer(request.user.userIndex, serviceIdx, containerName)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        container: data,
+      },
+      message: 'Container Start Command Sent.'
+    }
+    return response;
+  }
+
+  @Post('/services/:serviceIdx/containers/:containerName/stop')
+  @UseGuards(JwtGuard)
+  async handleStopContainer(@Request() request: any, @Param('serviceIdx') serviceIdx: string, @Param('containerName') containerName: string) {
+    const data = await this.workspaceService.handleStopContainer(request.user.userIndex, serviceIdx, containerName)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        container: data,
+      },
+      message: 'Container Stop Command Sent.'
+    }
+    return response;
+  }
+
+  @Post('/services/:serviceIdx/containers/:containerName/restart')
+  @UseGuards(JwtGuard)
+  async handleRestartContainer(@Request() request: any, @Param('serviceIdx') serviceIdx: string, @Param('containerName') containerName: string) {
+    const data = await this.workspaceService.handleRestartContainer(request.user.userIndex, serviceIdx, containerName)
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {
+        container: data,
+      },
+      message: 'Container Restart Command Sent.'
     }
     return response;
   }

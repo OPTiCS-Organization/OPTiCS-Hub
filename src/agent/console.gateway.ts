@@ -142,6 +142,19 @@ export class ConsoleGateway implements OnGatewayConnection {
     const workspaceIndex = Number(payload.workspaceIndex);
     if (!(await this.canAccessWorkspace(client, workspaceIndex))) return;
     await client.join(this.workspaceRoom(workspaceIndex));
+    const agents = await this.prismaService.agents.findMany({
+      where: {
+        agent_parent_workspace: workspaceIndex,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+      },
+      select: { agent_uuid: true },
+    });
+    for (const agent of agents) {
+      this.agentGateway.sendToAgent(agent.agent_uuid, 'command', {
+        command: 'GET_CONTAINER_STATUS',
+      });
+    }
   }
 
   emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'container-status' | 'response', payload?: object) {

@@ -205,6 +205,75 @@ export class WorkspaceService {
     return toCamelCase(rawUpdatedAgent);
   }
 
+  async disconnectWorkspaceAgent(workspaceOwner: number, targetWorkspaceIdx: number, targetAgentCode: string) {
+    const rawAgent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_code: targetAgentCode.toUpperCase(),
+        agent_parent_workspace: targetWorkspaceIdx,
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: workspaceOwner,
+          workspace_deleted_at: null,
+        },
+      },
+    });
+
+    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+    if (rawAgent.agent_connection !== 'linked') throw new BadRequestException('Agent is not linked.');
+
+    const rawUpdatedAgent = await this.prismaService.agents.update({
+      where: {
+        agent_code: rawAgent.agent_code,
+      },
+      data: {
+        agent_connection: 'unlinked',
+        agent_parent_workspace: null,
+      },
+    });
+
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+      command: 'DISCONNECT',
+    });
+    this.consoleGateway.notifyWorkspaceUpdated(targetWorkspaceIdx);
+
+    return toCamelCase(rawUpdatedAgent);
+  }
+
+  async cancelWorkspaceAgentConnectionRequest(workspaceOwner: number, targetWorkspaceIdx: number, targetAgentCode: string) {
+    const rawAgent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_code: targetAgentCode.toUpperCase(),
+        agent_parent_workspace: targetWorkspaceIdx,
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: workspaceOwner,
+          workspace_deleted_at: null,
+        },
+      },
+    });
+
+    if (!rawAgent) throw new NotFoundException('Agent Not Found.');
+    if (rawAgent.agent_connection !== 'requested') throw new BadRequestException('Agent connection is not requested.');
+
+    const rawUpdatedAgent = await this.prismaService.agents.update({
+      where: {
+        agent_code: rawAgent.agent_code,
+      },
+      data: {
+        agent_connection: 'unlinked',
+        agent_parent_workspace: null,
+      },
+    });
+
+    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'connect-request-cancelled', {
+      workspaceIndex: targetWorkspaceIdx,
+      requestCancelledAt: new Date(),
+    });
+    this.consoleGateway.notifyWorkspaceUpdated(targetWorkspaceIdx);
+
+    return toCamelCase(rawUpdatedAgent);
+  }
+
   async handleCreateService(
     owner: number,
     body: {
@@ -455,6 +524,66 @@ export class WorkspaceService {
 
     this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
     return { serviceIndex: rawService.service_index };
+  }
+
+  async handleStartContainer(owner: number, serviceIdx: string, containerName: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+      command: 'CONTAINER_START',
+      serviceIndex: rawService.service_index,
+      containerName,
+    });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: rawService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
+
+    return { serviceIndex: rawService.service_index, containerName };
+  }
+
+  async handleStopContainer(owner: number, serviceIdx: string, containerName: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+      command: 'CONTAINER_STOP',
+      serviceIndex: rawService.service_index,
+      containerName,
+    });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: rawService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
+
+    return { serviceIndex: rawService.service_index, containerName };
+  }
+
+  async handleRestartContainer(owner: number, serviceIdx: string, containerName: string) {
+    const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+      command: 'CONTAINER_RESTART',
+      serviceIndex: rawService.service_index,
+      containerName,
+    });
+    if (!sent) {
+      await this.prismaService.services.update({
+        where: { service_index: rawService.service_index },
+        data: { service_status: 'failed' },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.ensureCommandSent(sent);
+    }
+
+    return { serviceIndex: rawService.service_index, containerName };
   }
 
   async handleGetServiceList(owner: number, workspaceIdx: number) {
