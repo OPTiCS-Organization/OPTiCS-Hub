@@ -343,7 +343,7 @@ export class WorkspaceService {
       }
     })();
     const hostPort = body.serviceHostPort ?? body.servicePort ?? rawService.service_host_port ?? rawService.service_port;
-    const containerPort = body.serviceContainerPort ?? rawService.service_container_port ?? rawService.service_port;
+    const containerPort = body.serviceContainerPort ?? body.servicePort ?? rawService.service_container_port ?? rawService.service_port;
     const rootDirectory = body.serviceRootDirectory !== undefined
       ? (body.serviceRootDirectory.trim() || null)
       : rawService.service_root_directory;

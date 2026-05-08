@@ -105,6 +105,7 @@ enum AgentStatus {
 enum ServiceStatus {
   waiting
   building
+  starting
   running
   stopped
   failed

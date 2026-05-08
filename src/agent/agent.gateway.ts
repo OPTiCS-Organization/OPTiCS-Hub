@@ -59,6 +59,23 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.consoleGateway.emitToWorkspace(workspaceIndex, 'response', payload as object);
   }
 
+  @SubscribeMessage('container-status')
+  async handleContainerStatus(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: {
+      serviceIndex: number;
+      containers: { name: string; status: string; service?: string; exitCode?: number | null; health?: string | null }[];
+      counts?: { running: number; total: number };
+    },
+  ) {
+    const agentCode = client.data.agentCode as string | undefined;
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
+    if (!workspaceIndex) return;
+    this.consoleGateway.emitToWorkspace(workspaceIndex, 'container-status', { agentCode, ...payload });
+  }
+
   @SubscribeMessage('service-status')
   async handleServiceStatus(
     @ConnectedSocket() client: Socket,
@@ -70,7 +87,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
     if (!workspaceIndex) return;
 
-    const dbStatuses = ['waiting', 'building', 'running', 'stopped', 'failed', 'removed'];
+    const dbStatuses = ['waiting', 'building', 'starting', 'running', 'stopped', 'failed', 'removed'];
     if (dbStatuses.includes(payload.status)) {
       await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
     }
