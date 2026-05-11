@@ -14,6 +14,17 @@ import { ConsoleGateway } from './console.gateway';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 
+type ServiceLogPayload = {
+  serviceIndex: number;
+  log: string;
+  timestamp?: string;
+  source?: 'hub' | 'agent' | 'runtime';
+  stream?: 'deploy' | 'lifecycle' | 'runtime';
+  containerName?: string;
+  composeService?: string;
+  stderr?: boolean;
+};
+
 @Injectable()
 @WebSocketGateway({ namespace: '/agent' })
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -89,7 +100,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const dbStatuses = ['waiting', 'building', 'starting', 'running', 'stopped', 'failed', 'removed'];
     if (dbStatuses.includes(payload.status)) {
-      await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status);
+      await this.agentService.updateServiceStatus(payload.serviceIndex, payload.status).catch((error: unknown) => {
+        log(`[Agent Gateway] Failed to update service status | serviceIndex=${payload.serviceIndex} | status=${payload.status} | ${String(error)}`, 500, 'ERROR');
+      });
     }
     if (workspaceIndex) {
       this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-status', { agentCode, ...payload });
@@ -99,7 +112,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('service-log')
   async handleServiceLog(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { serviceIndex: number; log: string; timestamp?: string },
+    @MessageBody() payload: ServiceLogPayload,
   ) {
     const agentCode = client.data.agentCode as string | undefined;
     const agentUuid = client.data.agentUuid as string | undefined;
@@ -129,7 +142,15 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: Socket,
     @MessageBody() payload: {
       serviceIndex: number;
-      logs: { line: string; timestamp?: string }[];
+      logs: {
+        line: string;
+        timestamp?: string;
+        source?: 'hub' | 'agent' | 'runtime';
+        stream?: 'deploy' | 'lifecycle' | 'runtime';
+        containerName?: string;
+        composeService?: string;
+        stderr?: boolean;
+      }[];
       markers?: { serviceIndex: number; serviceName: string; containerName: string; event: string; timestamp: string }[];
       before?: string;
       hasMore?: boolean;

@@ -481,6 +481,9 @@ export class WorkspaceService {
 
   async handleStartService(owner: number, serviceIdx: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service must be redeployed before it can be started.');
+    }
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'START',
@@ -507,6 +510,9 @@ export class WorkspaceService {
 
   async handleStopService(owner: number, serviceIdx: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service cannot be stopped.');
+    }
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'STOP',
@@ -533,6 +539,9 @@ export class WorkspaceService {
 
   async handleStartContainer(owner: number, serviceIdx: string, containerName: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service must be redeployed before containers can be started.');
+    }
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_START',
@@ -555,6 +564,9 @@ export class WorkspaceService {
 
   async handleStopContainer(owner: number, serviceIdx: string, containerName: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service containers cannot be stopped.');
+    }
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_STOP',
@@ -577,6 +589,9 @@ export class WorkspaceService {
 
   async handleRestartContainer(owner: number, serviceIdx: string, containerName: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service must be redeployed before containers can be restarted.');
+    }
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_RESTART',
