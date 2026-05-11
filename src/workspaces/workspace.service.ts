@@ -190,17 +190,28 @@ export class WorkspaceService {
         agent_parent_workspace: targetWorkspaceIdx
       },
       where: {
-        agent_code: targetAgentCode
+        agent_code: rawAgent.agent_code
       }
     });
 
-    this.agentGateway.sendToAgent(rawUpdatedAgent.agent_uuid, 'connect-request', {
+    const sent = this.agentGateway.sendToAgent(rawUpdatedAgent.agent_uuid, 'connect-request', {
       workspaceOwnerName,
       workspaceName: rawWorkspace.workspace_name,
       workspaceCreatedAt: rawWorkspace.workspace_created_at,
       workspaceIndex: rawWorkspace.workspace_index,
       requestDatetime: new Date(),
     });
+    if (!sent) {
+      await this.prismaService.agents.update({
+        where: { agent_code: rawAgent.agent_code },
+        data: {
+          agent_connection: 'unlinked',
+          agent_parent_workspace: null,
+        },
+      });
+      this.consoleGateway.notifyWorkspaceUpdated(targetWorkspaceIdx);
+      throw new ServiceUnavailableException('Agent is not connected.');
+    }
 
     return toCamelCase(rawUpdatedAgent);
   }
@@ -228,12 +239,12 @@ export class WorkspaceService {
       data: {
         agent_connection: 'unlinked',
         agent_parent_workspace: null,
+        agent_status: 'offline',
+        agent_last_online: new Date(),
       },
     });
 
-    this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
-      command: 'DISCONNECT',
-    });
+    this.agentGateway.disconnectAgent(rawAgent.agent_uuid);
     this.consoleGateway.notifyWorkspaceUpdated(targetWorkspaceIdx);
 
     return toCamelCase(rawUpdatedAgent);

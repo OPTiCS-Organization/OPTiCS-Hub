@@ -32,6 +32,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server!: Server;
 
   private readonly agentUuidToSocketId = new Map<string, string>();
+  private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
   constructor(
     private readonly agentService: AgentService,
     private readonly prismaService: PrismaService,
@@ -200,11 +201,13 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const agent = await this.agentService.registerAgent(ip, payload.agentUuid);
 
+    this.clearOfflineTimer(agent.agentUuid);
     this.agentUuidToSocketId.set(agent.agentUuid, client.id);
     client.data.agentCode = agent.agentCode;
     client.data.agentUuid = agent.agentUuid;
     client.data.workspaceIndex = agent.agentParentWorkspace;
     client.emit('register', agent);
+    this.consoleGateway.notifyWorkspaceUpdated(agent.agentParentWorkspace);
   }
 
   handleDisconnect(client: Socket) {
@@ -212,8 +215,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const agentUuid = (client.data.agentUuid as string | undefined) ?? (client.handshake.auth as { agentUuid?: string }).agentUuid;
     log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
     if (agentCode && agentUuid) {
+      if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
       this.agentUuidToSocketId.delete(agentUuid);
-      void this.agentService.markAgentOffline(agentUuid);
+      this.scheduleOffline(agentUuid);
     }
   }
 
@@ -222,5 +226,38 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!socketId) return false;
     this.server.to(socketId).emit(event, payload);
     return true;
+  }
+
+  disconnectAgent(agentUuid: string): boolean {
+    const socketId = this.agentUuidToSocketId.get(agentUuid);
+    if (!socketId) return false;
+
+    const socket = this.server.sockets.sockets.get(socketId);
+    socket?.emit('command', { command: 'DISCONNECT' });
+    setTimeout(() => socket?.disconnect(true), 250);
+    this.agentUuidToSocketId.delete(agentUuid);
+    this.clearOfflineTimer(agentUuid);
+    return true;
+  }
+
+  isAgentConnected(agentUuid: string): boolean {
+    return this.agentUuidToSocketId.has(agentUuid);
+  }
+
+  private scheduleOffline(agentUuid: string) {
+    this.clearOfflineTimer(agentUuid);
+    const timer = setTimeout(() => {
+      this.offlineTimers.delete(agentUuid);
+      if (this.agentUuidToSocketId.has(agentUuid)) return;
+      void this.agentService.markAgentOffline(agentUuid);
+    }, 3000);
+    this.offlineTimers.set(agentUuid, timer);
+  }
+
+  private clearOfflineTimer(agentUuid: string) {
+    const timer = this.offlineTimers.get(agentUuid);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.offlineTimers.delete(agentUuid);
   }
 }

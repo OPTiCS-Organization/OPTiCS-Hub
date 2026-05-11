@@ -23,7 +23,7 @@ export class AgentService implements OnModuleInit {
     log('Accept')
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
-        agent_code: agentCode,
+        agent_code: agentCode.toUpperCase(),
         agent_uuid: agentUuid,
         agent_connection: 'requested',
       }
@@ -33,7 +33,7 @@ export class AgentService implements OnModuleInit {
 
     const rawUpdatedAgent = await this.prismaService.agents.update({
       where: {
-        agent_code: agentCode,
+        agent_code: agentCode.toUpperCase(),
         agent_uuid: agentUuid,
         agent_connection: 'requested',
       },
@@ -83,7 +83,8 @@ export class AgentService implements OnModuleInit {
           },
           data: {
             agent_status: 'online',
-            agent_ip: ip
+            agent_ip: ip,
+            agent_last_online: new Date(),
           },
         });
         agent.agentCode = updatedAgent.agent_code;
@@ -192,7 +193,7 @@ export class AgentService implements OnModuleInit {
     log('Rejecting')
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
-        agent_code: agentCode,
+        agent_code: agentCode.toUpperCase(),
         agent_uuid: agentUuid,
         agent_connection: 'requested',
       }
@@ -202,7 +203,7 @@ export class AgentService implements OnModuleInit {
 
     const rawUpdatedAgent = await this.prismaService.agents.update({
       where: {
-        agent_code: agentCode,
+        agent_code: agentCode.toUpperCase(),
         agent_uuid: agentUuid,
         agent_connection: 'requested',
       },
