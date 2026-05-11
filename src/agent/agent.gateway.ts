@@ -110,6 +110,57 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('log-load-progress')
+  async handleLogLoadProgress(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { serviceIndex: number; loaded: number; total: number; percent: number; phase: string },
+  ) {
+    const agentCode = client.data.agentCode as string | undefined;
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
+    if (workspaceIndex) {
+      this.consoleGateway.emitToWorkspace(workspaceIndex, 'log-load-progress', { agentCode, ...payload });
+    }
+  }
+
+  @SubscribeMessage('service-log-history')
+  async handleServiceLogHistory(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: {
+      serviceIndex: number;
+      logs: { line: string; timestamp?: string }[];
+      markers?: { serviceIndex: number; serviceName: string; containerName: string; event: string; timestamp: string }[];
+      before?: string;
+      hasMore?: boolean;
+    },
+  ) {
+    const agentCode = client.data.agentCode as string | undefined;
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
+    if (workspaceIndex) {
+      this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-log-history', { agentCode, ...payload });
+    }
+  }
+
+  @SubscribeMessage('service-log-markers')
+  async handleServiceLogMarkers(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: {
+      serviceIndex: number;
+      markers: { serviceIndex: number; serviceName: string; containerName: string; event: string; timestamp: string }[];
+    },
+  ) {
+    const agentCode = client.data.agentCode as string | undefined;
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
+    if (workspaceIndex) {
+      this.consoleGateway.emitToWorkspace(workspaceIndex, 'service-log-markers', { agentCode, ...payload });
+    }
+  }
+
   /**
    * 연결 수락 시 일단 IP부터 저장,
    * Agent가 Validation 이벤트 emit할 때까지 대기

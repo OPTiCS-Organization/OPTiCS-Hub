@@ -365,24 +365,29 @@ export class WorkspaceService {
     return toCamelCase(raw);
   }
 
-  async handleDeleteService(owner: number, serviceIdx: string) {
+  async handleDeleteService(owner: number, serviceIdx: string, deleteScope: 'containers' | 'service' = 'containers') {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    const scope = deleteScope === 'service' ? 'service' : 'containers';
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'DELETE',
       serviceIndex: rawService.service_index,
       serviceName: rawService.service_name,
       deployPreset: rawService.service_deploy_preset,
+      deleteScope: scope,
     });
     this.ensureCommandSent(sent);
 
     await this.prismaService.services.update({
       where: { service_index: rawService.service_index },
-      data: { service_status: 'removed' },
+      data: {
+        service_status: 'removed',
+        service_deleted_at: scope === 'service' ? new Date() : null,
+      },
     });
     this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
 
-    return { serviceIndex: rawService.service_index };
+    return { serviceIndex: rawService.service_index, deleteScope: scope };
   }
 
   async handleRedeployService(
@@ -532,6 +537,8 @@ export class WorkspaceService {
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_START',
       serviceIndex: rawService.service_index,
+      serviceName: rawService.service_name,
+      deployPreset: rawService.service_deploy_preset,
       containerName,
     });
     if (!sent) {
@@ -552,6 +559,8 @@ export class WorkspaceService {
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_STOP',
       serviceIndex: rawService.service_index,
+      serviceName: rawService.service_name,
+      deployPreset: rawService.service_deploy_preset,
       containerName,
     });
     if (!sent) {
@@ -572,6 +581,8 @@ export class WorkspaceService {
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_RESTART',
       serviceIndex: rawService.service_index,
+      serviceName: rawService.service_name,
+      deployPreset: rawService.service_deploy_preset,
       containerName,
     });
     if (!sent) {

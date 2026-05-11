@@ -157,7 +157,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     }
   }
 
-  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'container-status' | 'response', payload?: object) {
+  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'service-log-history' | 'service-log-markers' | 'log-load-progress' | 'container-status' | 'response', payload?: object) {
     this.server.to(this.workspaceRoom(workspaceIndex)).emit(event, payload);
   }
 

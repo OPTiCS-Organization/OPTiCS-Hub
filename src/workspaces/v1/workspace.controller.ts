@@ -134,8 +134,8 @@ export class WorkspaceController {
 
   @Delete('/services/:serviceIdx')
   @UseGuards(JwtGuard)
-  async handleDeleteService(@Request() request: any, @Param('serviceIdx') param: string) {
-    const data = await this.workspaceService.handleDeleteService(request.user.userIndex, param);
+  async handleDeleteService(@Request() request: any, @Param('serviceIdx') param: string, @Body() body: { deleteScope?: 'containers' | 'service' }) {
+    const data = await this.workspaceService.handleDeleteService(request.user.userIndex, param, body?.deleteScope);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: { service: data },
