@@ -1,0 +1,36 @@
+services:
+  # nginx:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #   depends_on:
+  #     - hub
+  #     - console
+
+  hub:
+    build: .
+    image: optics-hub:latest
+    env_file:
+      - ../OPTiCS-Infra/env/hub.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "3000:3000"
+    expose:
+      - "3000"
+  
+  console:
+    build:
+      context: ../OPTiCS-Hub-Console
+      args:
+        VITE_API_URL: http://localhost:3000
+    image: optics-hub-console:latest
+    env_file:
+      - ../OPTiCS-Infra/env/hub-console.env
+    ports:
+      - "80:5173"
+    expose:
+      - "5173"
