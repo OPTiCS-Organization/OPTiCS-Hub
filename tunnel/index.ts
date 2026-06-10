@@ -1,5 +1,5 @@
 import net from 'net'
-import { claim, register, release } from './registry';
+import { claim, register, release } from './registry.ts';
 
 const controlServer = net.createServer((socket) => {
   console.log('Local client connected to tunnel');
