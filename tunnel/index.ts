@@ -1,6 +1,5 @@
-import net, { Socket } from 'net'
-
-let localClientSocket: Map<string, { socket: Socket, rest: Buffer }> = new Map();
+import net from 'net'
+import { claim, register, release } from './registry';
 
 const controlServer = net.createServer((socket) => {
   console.log('Local client connected to tunnel');
@@ -14,12 +13,10 @@ const controlServer = net.createServer((socket) => {
     if (idx == -1) return;
 
     token = buffer.subarray(0, idx).toString();
-    const exist = localClientSocket.get(token);
+    const exist = claim(token);
     socket.off('data', onData);
 
     if (exist) {
-      localClientSocket.delete(token);
-
       exist.socket.write(buffer.subarray(idx + 1));
       socket.write(exist.rest)
 
@@ -31,7 +28,7 @@ const controlServer = net.createServer((socket) => {
 
       console.log(`Token found and removing listener: ${token}`);
     } else {
-      localClientSocket.set(token, { socket: socket, rest: buffer.subarray(idx + 1) });
+      register(token, socket, buffer.subarray(idx + 1));
       console.log(`Token not found. hibernating until connection establishes.`);
       socket.pause();
     }
@@ -40,8 +37,7 @@ const controlServer = net.createServer((socket) => {
 
   const onClose = (hadError: boolean) => {
     console.log(`Client disconnected. Expired token: ${token}`);
-    if (localClientSocket.get(token)?.socket === socket)
-      localClientSocket.delete(token);
+    release(token, socket);
   }
 
   const onError = (error: Error) => {
