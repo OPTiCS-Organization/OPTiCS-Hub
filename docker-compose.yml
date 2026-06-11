@@ -34,3 +34,17 @@ services:
       - "80:5173"
     expose:
       - "5173"
+
+  mysql:
+    image: mysql:8
+    env_file:
+      - ../OPTiCS-Infra/env/mysql.env
+    ports:
+      - "3307:3306"
+    expose:
+      - "3306"
+    volumes:
+      - mysql-optics:/var/lib/mysql
+
+volumes:
+  mysql-optics:
