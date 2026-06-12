@@ -23,6 +23,9 @@ COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/prisma.config.ts ./
 
+COPY --from=build /app/tunnel ./tunnel
+COPY --from=build /app/proxy ./proxy
+
 EXPOSE 3000
 
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]

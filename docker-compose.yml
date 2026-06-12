@@ -22,6 +22,20 @@ services:
     expose:
       - "3000"
   
+  gateway:
+    build: .
+    image: optics-hub:latest
+    command: ["node", "tunnel/index.ts"]
+    env_file:
+      - ../OPTiCS-Infra/env/gateway.env
+    environment:
+      HUB_API_URL: http://hub:3000
+    ports:
+      - "5220:5220"
+      - "10000:10000"
+    depends_on:
+      - hub
+  
   console:
     build:
       context: ../OPTiCS-Hub-Console

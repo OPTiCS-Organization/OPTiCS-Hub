@@ -2,7 +2,7 @@ import net from 'net';
 import { randomUUID } from 'crypto';
 import { register, release } from '../tunnel/registry.ts';
 import dotenv from 'dotenv';
-dotenv.config({ path: '../OPTiCS-Infra/env/hub.env' })
+dotenv.config({ path: '../OPTiCS-Infra/env/gateway.env' })
 
 const proxyServer = net.createServer((socket) => {
   let buffer = Buffer.alloc(0);
@@ -29,7 +29,7 @@ const proxyServer = net.createServer((socket) => {
     }
 
     try {
-      const response = await fetch('http://localhost:3000/v1/tunnel/connect', {
+      const response = await fetch(`${process.env.HUB_API_URL}/v1/tunnel/connect`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
