@@ -11,6 +11,7 @@ import {
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma.module';
 import { AgentModule } from './agent/agent.module';
+import { TunnelModule } from './tunnel/tunnel.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AgentModule } from './agent/agent.module';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AgentModule,
+    TunnelModule,
   ],
   controllers: [WorkspaceController],
   providers: [
