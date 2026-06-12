@@ -71,6 +71,7 @@ model services {
   service_container_port Int?
   service_host_port      Int?
   service_source_url     String
+  service_subdomain      String? @unique
   service_root_directory String?
   service_env            Json?
   service_parent_agent   Int
