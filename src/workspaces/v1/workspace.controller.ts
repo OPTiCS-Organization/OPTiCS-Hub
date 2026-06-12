@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards } from '@nestjs/common';
 import { WorkspaceService } from '../workspace.service';
 import { JwtGuard } from 'src/auth/interceptor/guard/jwt.guard';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
@@ -7,6 +7,7 @@ import { CreateWorkspace } from '../dto/CreateWorkspace.dto';
 import { ConnectWorkspace } from '../dto/ConnectWorkspace.dto';
 import { CheckWorkspaceName } from '../dto/CheckWorkspaceName.dto';
 import { RedeployService } from '../dto/RedeployService.dto';
+import { UpdateServiceSubdomain } from '../dto/UpdateServiceSubdomain.dto';
 
 @Controller({ path: 'workspace', version: '1' })
 export class WorkspaceController {
@@ -223,6 +224,18 @@ export class WorkspaceController {
       },
       message: 'Container Restart Command Sent.'
     }
+    return response;
+  }
+
+  @Patch('/services/:serviceIdx/subdomain')
+  @UseGuards(JwtGuard)
+  async handleUpdateServiceSubdomain(@Request() request: any, @Param('serviceIdx') param: string, @Body() body: UpdateServiceSubdomain) {
+    const data = await this.workspaceService.handleUpdateServiceSubdomain(request.user.userIndex, param, body.subdomain ?? null);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Subdomain Updated Successfully.',
+    };
     return response;
   }
 

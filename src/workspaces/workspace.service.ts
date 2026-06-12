@@ -623,6 +623,30 @@ export class WorkspaceService {
     return { serviceIndex: rawService.service_index, containerName };
   }
 
+  async handleUpdateServiceSubdomain(owner: number, serviceIdx: string, subdomain: string | null) {
+    const { rawService } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    if (subdomain !== null) {
+      const duplicate = await this.prismaService.services.findFirst({
+        where: {
+          service_subdomain: subdomain,
+          service_index: { not: rawService.service_index },
+        },
+      });
+      if (duplicate) throw new ConflictException('Subdomain Already In Use.');
+    }
+
+    const updated = await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: { service_subdomain: subdomain },
+    });
+
+    return {
+      serviceIndex: updated.service_index,
+      serviceSubdomain: updated.service_subdomain,
+    };
+  }
+
   async handleGetServiceList(owner: number, workspaceIdx: number) {
     const workspace = await this.prismaService.workspaces.findFirst({
       where: { workspace_index: workspaceIdx, workspace_owner: owner, workspace_deleted_at: null },
@@ -654,6 +678,7 @@ export class WorkspaceService {
       serviceRootDirectory: s.service_root_directory,
       serviceEnv: this.normalizeEnv(s.service_env),
       serviceStatus: s.service_status,
+      serviceSubdomain: s.service_subdomain,
       serviceVersion: s.service_version,
       serviceDeployPreset: s.service_deploy_preset,
       serviceCreatedAt: s.service_created_at,
