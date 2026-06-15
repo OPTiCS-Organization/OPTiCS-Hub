@@ -28,7 +28,7 @@ const controlServer = net.createServer((socket) => {
 
       console.log(`Token found and removing listener: ${token}`);
     } else {
-      register(token, socket, buffer.subarray(idx + 1));
+      register(token, socket, buffer.subarray(idx + 1), () => onClose());
       console.log(`Token not found. hibernating until connection establishes.`);
       socket.pause();
     }
