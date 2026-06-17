@@ -1,12 +1,21 @@
 import net from 'net'
 import { claim, register, release } from './registry.ts';
 
+/**
+ * 에이전트의 연결을 받는 터널 서버
+ * 역할
+ * - 에이전트의 연결을 받아 터널 토큰을 발급하고 클라이언트와 에이전트 서비스 간 TCP 바이트 파이핑을 통해 통신
+ */
 const controlServer = net.createServer((socket) => {
-  console.log('Local client connected to tunnel');
-
+  /**
+   * 연결 수립 시 터널 토큰을 받을 버퍼 생성
+   */
   let buffer = Buffer.alloc(0);
   let token = '';
 
+  /**
+   * 에이전트의 연결을 받아 터널 토큰을 발급하고 클라이언트와 에이전트 서비스 간 TCP 바이트 파이핑을 통해 통신
+   */
   const onData = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
     const idx = buffer.indexOf(0x0a)  // \n의 바이트 값 0a
@@ -15,6 +24,7 @@ const controlServer = net.createServer((socket) => {
     token = buffer.subarray(0, idx).toString();
     const exist = claim(token);
     socket.off('data', onData);
+
 
     if (exist) {
       exist.socket.write(buffer.subarray(idx + 1));
@@ -25,23 +35,29 @@ const controlServer = net.createServer((socket) => {
 
       socket.once('close', () => exist.socket.destroy());
       exist.socket.once('close', () => socket.destroy());
-
-      console.log(`Token found and removing listener: ${token}`);
     } else {
+<<<<<<< Updated upstream
       register(token, socket, buffer.subarray(idx + 1));
       console.log(`Token not found. hibernating until connection establishes.`);
+=======
+      register(token, socket, buffer.subarray(idx + 1), () => onClose());
+>>>>>>> Stashed changes
       socket.pause();
     }
 
   };
 
   const onClose = () => {
-    console.log(`Client disconnected. Expired token: ${token}`);
     release(token, socket);
   }
 
   const onError = (error: Error) => {
-    console.error(error);
+    console.error(
+      `[TunnelServer] {{ red : bold : AGENT_CONNECTION_ERROR }}\n` +
+      `  Error : ${error}\n` +
+      `  Token : ${token}\n` +
+      `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+    );
   }
 
   socket.once('error', onError);
@@ -50,5 +66,8 @@ const controlServer = net.createServer((socket) => {
 });
 
 export function startTunnelServer(port: number) {
-  controlServer.listen(port, () => { console.log(`Tunnel control server is running on port ${port}`) });
+  controlServer.listen(port, () => { console.log(
+    `[TunnelServer] {{ green : bold : TUNNEL_SERVER_STARTED }}\n` +
+    `  Port : ${port}`
+  )});
 }

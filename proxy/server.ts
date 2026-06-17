@@ -4,20 +4,36 @@ import { register, release } from '../tunnel/registry.ts';
 import dotenv from 'dotenv';
 dotenv.config({ path: '../OPTiCS-Infra/env/gateway.env' })
 
+/**
+ * 클라이언트의 연결을 받는 프록시 서버
+ * 역할
+ * - 클라이언트의 HTTP 요청에서 서브도메인을 파싱 후 터널 서버에 전달
+ * - 터널 서버에서 에이전트 연결을 대기하다가 연결되면 클라이언트와 에이전트 서비스 간 TCP 바이트 파이핑을 통해 통신
+ */
 const proxyServer = net.createServer((socket) => {
+  /**
+   * 연결 수립 시 HTTP 요청을 받을 버퍼 생성
+   * 터널 토큰 생성
+   */
   let buffer = Buffer.alloc(0);
   const token = randomUUID();
 
   const onData = async (chunk: NonSharedBuffer) => {
     buffer = Buffer.concat([buffer, chunk]);
     const idx = buffer.indexOf('\r\n\r\n');
-    if (idx === -1) return;
+    if (idx === -1) return;  // HTTP 헤더 분리 실패 시 처리하지 않음
 
     const header = buffer.subarray(0, idx).toString().split('\r\n')
     const hostLine = header.find(line => line.toLowerCase().startsWith('host:'));
     const serviceName = hostLine?.toLowerCase().replace('host: ', '').split(':')[0].split('.')[0];
 
-    register(token, socket, buffer, () => {
+    console.log(
+      `[ProxyServer] {{ green : bold : HTTP_REQUEST_RECEIVED }}\n` +
+      `  Service : ${serviceName}\n` +
+      `  Token : ${token}`
+    );
+
+    register(token, socket, buffer, () => {  // 터널 토큰 등록
       socket.end(makeResponse(504, 'Gateway Timeout'));
     });
     socket.off('data', onData);
@@ -42,8 +58,13 @@ const proxyServer = net.createServer((socket) => {
         socket.end(makeResponse(504, 'Gateway Timeout'));
       }
     } catch (error) {
+      console.log(
+        `[ProxyServer] {{ red : bold : TUNNEL_CONNECTION_FAILED }}\n` +
+        `  Error : ${error}\n` +
+        `  Token : ${token}\n` +
+        `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+      );
       socket.end(makeResponse(504, 'Gateway Timeout'));
-      console.log(error);
     }
   }
 
@@ -52,7 +73,11 @@ const proxyServer = net.createServer((socket) => {
   }
 
   const onError = (error: Error) => {
-    console.error(error);
+    console.error(
+      `[ProxyServer] {{ red : bold : PROXY_SERVER_ERROR }}\n` +
+      `  Error : ${error}\n` +
+      `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+    );
   }
 
   socket.once('close', onClose);
@@ -61,7 +86,10 @@ const proxyServer = net.createServer((socket) => {
 });
 
 export function startProxyServer(port: number) {
-  proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
+  proxyServer.listen(port, () => console.log(
+    `[ProxyServer] {{ green : bold : PROXY_SERVER_STARTED }}\n` +
+    `  Port : ${port}`
+  ))
 }
 
 function makeResponse(status: number, reason: string, body: string = '') {
