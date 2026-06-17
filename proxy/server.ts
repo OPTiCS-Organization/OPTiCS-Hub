@@ -28,7 +28,7 @@ const proxyServer = net.createServer((socket) => {
     const serviceName = hostLine?.toLowerCase().replace('host: ', '').split(':')[0].split('.')[0];
 
     console.log(
-      `[ProxyServer] {{ green : bold : HTTP_REQUEST_RECEIVED }}\n` +
+      `[ProxyServer] HTTP_REQUEST_RECEIVED\n` +
       `  Service : ${serviceName}\n` +
       `  Token : ${token}`
     );
@@ -59,7 +59,7 @@ const proxyServer = net.createServer((socket) => {
       }
     } catch (error) {
       console.log(
-        `[ProxyServer] {{ red : bold : TUNNEL_CONNECTION_FAILED }}\n` +
+        `[ProxyServer] TUNNEL_CONNECTION_ERROR\n` +
         `  Error : ${error}\n` +
         `  Token : ${token}\n` +
         `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
@@ -74,7 +74,7 @@ const proxyServer = net.createServer((socket) => {
 
   const onError = (error: Error) => {
     console.error(
-      `[ProxyServer] {{ red : bold : PROXY_SERVER_ERROR }}\n` +
+      `[ProxyServer] PROXY_SERVER_ERROR\n` +
       `  Error : ${error}\n` +
       `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
     );
@@ -87,7 +87,7 @@ const proxyServer = net.createServer((socket) => {
 
 export function startProxyServer(port: number) {
   proxyServer.listen(port, () => console.log(
-    `[ProxyServer] {{ green : bold : PROXY_SERVER_STARTED }}\n` +
+    `[ProxyServer] PROXY_SERVER_STARTED\n` +
     `  Port : ${port}`
   ))
 }

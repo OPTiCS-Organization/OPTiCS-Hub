@@ -36,12 +36,14 @@ const controlServer = net.createServer((socket) => {
       socket.once('close', () => exist.socket.destroy());
       exist.socket.once('close', () => socket.destroy());
     } else {
-<<<<<<< Updated upstream
-      register(token, socket, buffer.subarray(idx + 1));
-      console.log(`Token not found. hibernating until connection establishes.`);
-=======
-      register(token, socket, buffer.subarray(idx + 1), () => onClose());
->>>>>>> Stashed changes
+      register(token, socket, buffer.subarray(idx + 1), () => {
+        console.log(
+          `[TunnelServer] CONNECTION_TIMEOUT\n` +
+          `  Token : ${token}\n` +
+          `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+        );
+        release(token, socket);
+      });
       socket.pause();
     }
 
@@ -53,7 +55,7 @@ const controlServer = net.createServer((socket) => {
 
   const onError = (error: Error) => {
     console.error(
-      `[TunnelServer] {{ red : bold : AGENT_CONNECTION_ERROR }}\n` +
+      `[TunnelServer] AGENT_CONNECTION_ERROR\n` +
       `  Error : ${error}\n` +
       `  Token : ${token}\n` +
       `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
@@ -67,7 +69,7 @@ const controlServer = net.createServer((socket) => {
 
 export function startTunnelServer(port: number) {
   controlServer.listen(port, () => { console.log(
-    `[TunnelServer] {{ green : bold : TUNNEL_SERVER_STARTED }}\n` +
+    `[TunnelServer] TUNNEL_SERVER_STARTED\n` +
     `  Port : ${port}`
   )});
 }
