@@ -49,7 +49,7 @@ const controlServer = net.createServer((socket) => {
           `  Token : ${token}\n` +
           `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
         );
-        release(token, socket);
+        release(token, socket, 'timeout');
       });
       socket.pause();
     }
@@ -57,7 +57,7 @@ const controlServer = net.createServer((socket) => {
   };
 
   const onClose = () => {
-    release(token, socket);
+    release(token, socket, 'agent_close');
     console.log(
       `[TunnelServer] CONNECTION_CLOSED\n` +
       `  Side : Agent\n` +

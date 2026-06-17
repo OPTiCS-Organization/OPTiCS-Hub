@@ -75,7 +75,7 @@ const proxyServer = net.createServer((socket) => {
       `  Token : ${token}\n` +
       `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
     );
-    release(token, socket)
+    release(token, socket, 'proxy_close')
   }
 
   const onError = (error: Error) => {
