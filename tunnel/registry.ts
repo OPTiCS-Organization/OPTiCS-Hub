@@ -1,6 +1,6 @@
 import { Socket } from "net";
 
-const localClientSocket: Map<string, { socket: Socket, rest: Buffer, timer: NodeJS.Timeout }> = new Map();
+const localClientSocket: Map<string, { socket: Socket, socketId: string, rest: Buffer, timer: NodeJS.Timeout }> = new Map();
 
 export function register(token: string, socket: Socket, rest: Buffer, onTimeout: () => void) {
   console.log(
@@ -17,7 +17,7 @@ export function register(token: string, socket: Socket, rest: Buffer, onTimeout:
     localClientSocket.delete(token);
     onTimeout();
   }, 10_000);
-  localClientSocket.set(token, { socket, rest, timer });
+  localClientSocket.set(token, { socket, socketId: socket.remoteAddress + ':' + socket.remotePort, rest, timer });
 }
 
 export function claim(token: string) {
@@ -30,16 +30,20 @@ export function claim(token: string) {
   localClientSocket.delete(token);
   console.log(
     `[TunnelRegistry] CONNECTION_RELEASED\n` +
-    `  Token : ${token}`
+    `  Token : ${token}\n` +
+    `  Found : ${entry ? 'true' : 'false'}\n` +
+    `  Socket ID : ${entry?.socketId}`
   );
   return entry;
 }
 
 export function release(token: string, socket: Socket) {
   console.log(
-    `[TunnelRegistry] CONNECTION_RELEASED\n` +
+    `[TunnelRegistry] CONNECTION_RELEASE\n` +
     `  Token : ${token}\n` +
-    `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+    `  Found : ${localClientSocket.get(token) ? 'true' : 'false'}\n` +
+    `  Same Socket : ${localClientSocket.get(token)?.socket === socket ? 'true' : 'false'}\n` +
+    `  Socket ID : ${localClientSocket.get(token)?.socketId}`
   );
   if (localClientSocket.get(token)?.socket === socket) {
     clearTimeout(localClientSocket.get(token)!.timer);

@@ -47,10 +47,10 @@ const proxyServer = net.createServer((socket) => {
     try {
       const response = await fetch(`${process.env.HUB_API_URL}/v1/tunnel/connect`, {
         method: "POST",
-        headers: {
+        headers: new Headers({
           "Content-Type": "application/json",
-          "x-internal-secret": process.env.TUNNEL_INTERNAL_SECRET,
-        },
+          "x-internal-secret": process.env.TUNNEL_INTERNAL_SECRET ?? '',
+        }),
         body: JSON.stringify(body),
       });
 
@@ -69,6 +69,12 @@ const proxyServer = net.createServer((socket) => {
   }
 
   const onClose = () => {
+    console.log(
+      `[ProxyServer] HTTP_REQUEST_CLOSED\n` +
+      `  Side : Client\n` +
+      `  Token : ${token}\n` +
+      `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+    );
     release(token, socket)
   }
 

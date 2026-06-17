@@ -33,6 +33,13 @@ const controlServer = net.createServer((socket) => {
       socket.pipe(exist.socket);
       exist.socket.pipe(socket);
 
+      console.log(
+        `[TunnelServer] CONNECTION_ESTABLISHED\n` +
+        `  Token : ${token}\n` +
+        `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}\n` +
+        `  Client Socket ID : ${exist.socketId}`
+      );
+
       socket.once('close', () => exist.socket.destroy());
       exist.socket.once('close', () => socket.destroy());
     } else {
@@ -51,6 +58,12 @@ const controlServer = net.createServer((socket) => {
 
   const onClose = () => {
     release(token, socket);
+    console.log(
+      `[TunnelServer] CONNECTION_CLOSED\n` +
+      `  Side : Agent\n` +
+      `  Token : ${token}\n` +
+      `  Socket ID : ${socket.remoteAddress}:${socket.remotePort}`
+    );
   }
 
   const onError = (error: Error) => {
