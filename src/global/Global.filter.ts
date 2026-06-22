@@ -1,5 +1,5 @@
 import {
-  ArgumentsHost,
+  type ArgumentsHost,
   Catch,
   ExceptionFilter,
   HttpException,
@@ -12,6 +12,7 @@ import log from 'spectra-log';
 import { GlobalResponse } from './GlobalResponse.dto';
 import { Code } from './Code.enum';
 import { cookieOptions } from './cookie-options';
+import { SentryExceptionCaptured } from '@sentry/nestjs';
 
 @Catch(TokenExpiredException)
 export class TokenRefreshFilter implements ExceptionFilter {
@@ -58,8 +59,9 @@ export class TokenRefreshFilter implements ExceptionFilter {
 
 @Catch(HttpException)
 export class HttpExceptionFilter implements ExceptionFilter {
+  @SentryExceptionCaptured()
   catch(exception: any, host: ArgumentsHost) {
-    const _Response: GlobalResponse = {};
+    // const _Response: GlobalResponse = {}; 사용하지 않는 변수
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const statusCode = exception.getStatus
