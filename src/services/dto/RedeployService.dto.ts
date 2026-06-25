@@ -1,6 +1,23 @@
 import { IsArray, IsEnum, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
 import { DeployPreset } from '@prisma/client';
 
+export class ServicePortMapping {
+  @IsNumber()
+  hostPort: number;
+
+  @IsNumber()
+  containerPort: number;
+}
+
+export class SourceRepository {
+  @IsString()
+  url: string;
+
+  @IsOptional()
+  @IsString()
+  rootDirectory?: string | null;
+}
+
 export class RedeployService {
   @IsOptional()
   @IsString()
@@ -19,7 +36,11 @@ export class RedeployService {
   serviceHostPort?: number;
 
   @IsOptional()
-  serviceSourceUrl?: string | string[];
+  @IsArray()
+  servicePortMappings?: ServicePortMapping[];
+
+  @IsOptional()
+  serviceSourceUrl?: string | string[] | SourceRepository[];
 
   @IsOptional()
   @IsString()
