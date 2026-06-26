@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Request, UseGuards } from '@nestjs/common';
 import { WorkspaceService } from '../workspace.service';
 import { JwtGuard } from 'src/auth/interceptor/guard/jwt.guard';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
@@ -6,6 +6,9 @@ import { Code } from 'src/global/Code.enum';
 import { CreateWorkspace } from '../dto/CreateWorkspace.dto';
 import { ConnectWorkspace } from '../dto/ConnectWorkspace.dto';
 import { CheckWorkspaceName } from '../dto/CheckWorkspaceName.dto';
+import { ToggleWorkspaceSubdomain } from '../dto/ToggleWorkspaceSubdomain.dto';
+import { UpdateWorkspaceSubdomain } from '../dto/UpdateWorkspaceSubdomain.dto';
+import { DeleteWorkspace } from '../dto/DeleteWorkspace.dto';
 
 @Controller({ path: 'workspace', version: '1' })
 export class WorkspaceController {
@@ -21,7 +24,7 @@ export class WorkspaceController {
   @Post()
   @UseGuards(JwtGuard)
   async handleCreateWorkspace(@Request() request: any, @Body() body: CreateWorkspace) {
-    const data = await this.workspaceService.handleCreateWorkspace(request.user.userIndex, body.workspaceName);
+    const data = await this.workspaceService.handleCreateWorkspace(request.user.userIndex, body.workspaceName, body.workspaceSubdomain ?? null);
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -64,8 +67,8 @@ export class WorkspaceController {
 
   @Delete(':workspaceIdx')
   @UseGuards(JwtGuard)
-  async handleDeleteWorkspace(@Request() request: any, @Param('workspaceIdx') param: string) {
-    const data = await this.workspaceService.handleDeleteWorkspace(request.user.userIndex, parseInt(param))
+  async handleDeleteWorkspace(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: DeleteWorkspace) {
+    const data = await this.workspaceService.handleDeleteWorkspace(request.user.userIndex, parseInt(param), request.user.userDisplay, body?.confirmation ?? '')
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
       data: {
@@ -115,6 +118,30 @@ export class WorkspaceController {
         data
       },
       message: 'Agent Connection Request Cancelled Successfully.',
+    };
+    return response;
+  }
+
+  @Patch(':workspaceIdx/subdomain')
+  @UseGuards(JwtGuard)
+  async handleUpdateWorkspaceSubdomain(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: UpdateWorkspaceSubdomain) {
+    const data = await this.workspaceService.handleUpdateWorkspaceSubdomain(request.user.userIndex, parseInt(param), body.subdomain ?? null);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { workspace: data },
+      message: 'Subdomain Updated Successfully.',
+    };
+    return response;
+  }
+
+  @Patch(':workspaceIdx/subdomain/active')
+  @UseGuards(JwtGuard)
+  async handleToggleWorkspaceSubdomain(@Request() request: any, @Param('workspaceIdx') param: string, @Body() body: ToggleWorkspaceSubdomain) {
+    const data = await this.workspaceService.handleToggleWorkspaceSubdomain(request.user.userIndex, parseInt(param), body.active);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { workspace: data },
+      message: body.active ? 'Subdomain Activated Successfully.' : 'Subdomain Deactivated Successfully.',
     };
     return response;
   }

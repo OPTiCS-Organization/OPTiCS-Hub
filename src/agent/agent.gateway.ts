@@ -5,6 +5,7 @@ import { AgentService } from './agent.service';
 import { ConsoleGateway } from './console.gateway';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
+import { ServiceComponentStatus } from '@prisma/client';
 
 type ServiceLogPayload = {
   serviceIndex: number;
@@ -35,7 +36,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private async getWorkspaceIndexForAgentService(agentUuid: string, serviceIndex: number): Promise<number | null> {
     const service = await this.prismaService.services.findFirst({
       where: { service_index: serviceIndex, service_deleted_at: null },
-      select: { service_parent_agent: true },
+      select: { service_parent_agent: true, service_parent_workspace: true },
     });
     if (!service) return null;
 
@@ -46,11 +47,78 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         agent_connection: 'linked',
         agent_deleted_at: null,
       },
-      select: { agent_parent_workspace: true },
+      select: { agent_index: true },
     });
-    if (!agent?.agent_parent_workspace) return null;
+    if (!agent) return null;
 
-    return agent.agent_parent_workspace;
+    return service.service_parent_workspace;
+  }
+
+  private normalizeComponentStatus(status: string): ServiceComponentStatus {
+    const validStatuses: ServiceComponentStatus[] = ['waiting', 'building', 'starting', 'running', 'stopped', 'failed', 'removed', 'restarting'];
+    return validStatuses.includes(status as ServiceComponentStatus)
+      ? status as ServiceComponentStatus
+      : 'stopped';
+  }
+
+  private async syncServiceComponents(
+    serviceIndex: number,
+    containers: { name: string; status: string; service?: string; exitCode?: number | null; health?: string | null }[],
+  ) {
+    const service = await this.prismaService.services.findFirst({
+      where: { service_index: serviceIndex, service_deleted_at: null },
+      select: { service_name: true, service_deploy_preset: true },
+    });
+    if (!service) return;
+
+    const seenNames = new Set<string>();
+    for (const container of containers) {
+      const componentName = container.service?.trim()
+        || (service.service_deploy_preset === 'compose' ? container.name : 'app');
+      if (!componentName) continue;
+      seenNames.add(componentName);
+
+      await this.prismaService.service_components.upsert({
+        where: {
+          component_parent_service_component_name: {
+            component_parent_service: serviceIndex,
+            component_name: componentName,
+          },
+        },
+        create: {
+          component_parent_service: serviceIndex,
+          component_name: componentName,
+          component_container_name: container.name,
+          component_status: this.normalizeComponentStatus(container.status),
+          component_health: container.health ?? null,
+          component_exit_code: container.exitCode ?? null,
+        },
+        update: {
+          component_container_name: container.name,
+          component_status: this.normalizeComponentStatus(container.status),
+          component_health: container.health ?? null,
+          component_exit_code: container.exitCode ?? null,
+          component_deleted_at: null,
+        },
+      });
+    }
+
+    if (containers.length === 0) {
+      await this.prismaService.service_components.updateMany({
+        where: { component_parent_service: serviceIndex, component_deleted_at: null },
+        data: { component_status: 'removed' },
+      });
+      return;
+    }
+
+    await this.prismaService.service_components.updateMany({
+      where: {
+        component_parent_service: serviceIndex,
+        component_deleted_at: null,
+        component_name: { notIn: [...seenNames] },
+      },
+      data: { component_status: 'removed' },
+    });
   }
 
   @SubscribeMessage('response')
@@ -77,6 +145,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!agentUuid) return;
     const workspaceIndex = await this.getWorkspaceIndexForAgentService(agentUuid, payload.serviceIndex);
     if (!workspaceIndex) return;
+    await this.syncServiceComponents(payload.serviceIndex, payload.containers).catch((error: unknown) => {
+      log(`[Agent Gateway] Failed to sync service components | serviceIndex=${payload.serviceIndex} | ${String(error)}`, 500, 'ERROR');
+    });
     this.consoleGateway.emitToWorkspace(workspaceIndex, 'container-status', { agentCode, ...payload });
   }
 

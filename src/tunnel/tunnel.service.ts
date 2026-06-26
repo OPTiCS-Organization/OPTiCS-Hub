@@ -9,30 +9,63 @@ export class TunnelService {
     private readonly agentGateway: AgentGateway,
   ) { };
 
-  async sendProxyInfo(subdomain: string, token: string) {
-    const service = await this.prismaService.services.findFirst({
+  /**
+   * 워크스페이스 서브도메인과 서비스 서브도메인으로 대상 서비스를 찾고,
+   * 해당 서비스에 연결된 배포 에이전트로 터널 연결 정보를 전달한다.
+   */
+  async sendProxyInfo(serviceSubdomain: string, workspaceSubdomain: string, token: string) {
+    const normalizedServiceSubdomain = serviceSubdomain.trim().toLowerCase() === '@'
+      ? ''
+      : serviceSubdomain.trim().toLowerCase();
+    const workspace = await this.prismaService.workspaces.findFirst({
       select: {
-        service_parent_agent: true,
-        service_status: true,
-        service_host_port: true,
+        workspace_index: true
       },
       where: {
-        service_subdomain: subdomain,
-        service_deleted_at: null,
+        workspace_subdomain: workspaceSubdomain,
+        workspace_subdomain_active: true,
       }
     });
 
-    if (!service) throw new NotFoundException('Service not found');
+    if (!workspace) throw new NotFoundException('Workspace not found');
 
-    const agent = await this.prismaService.agents.findFirst({
+    const endpoint = await this.prismaService.service_endpoints.findFirst({
+      select: {
+        endpoint_host_port: true,
+        service: {
+          select: {
+            service_status: true,
+            agent: {
+              select: {
+                agent_uuid: true,
+                agent_connection: true,
+                agent_deleted_at: true,
+              },
+            },
+          },
+        },
+      },
       where: {
-        agent_index: service.service_parent_agent
+        endpoint_parent_workspace: workspace.workspace_index,
+        endpoint_subdomain: normalizedServiceSubdomain,
+        endpoint_deleted_at: null,
+        service: {
+          service_deleted_at: null,
+        },
       }
     });
 
-    if (!agent) throw new NotFoundException('Agent not found');
+    if (!endpoint) throw new NotFoundException('Service not found');
 
-    const response = this.agentGateway.sendToAgent(agent?.agent_uuid, 'tunnel-connect', { 'token': token, 'service_port': service.service_host_port, 'tunnel_port': 5220 });
+    if (!endpoint.service.agent || endpoint.service.agent.agent_connection !== 'linked' || endpoint.service.agent.agent_deleted_at) {
+      throw new NotFoundException('Agent not found');
+    }
+
+    const response = this.agentGateway.sendToAgent(endpoint.service.agent.agent_uuid, 'tunnel-connect', {
+      'token': token,
+      'service_port': endpoint.endpoint_host_port,
+      'tunnel_port': 5220,
+    });
 
     if (!response) throw new ServiceUnavailableException('Agent is probably offline');
   }

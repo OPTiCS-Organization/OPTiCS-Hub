@@ -1,15 +1,11 @@
-import { IsNotIn, IsOptional, IsString, Length, Matches } from "class-validator";
+import { IsNotIn, IsOptional, Length, Matches } from "class-validator";
 
 const RESERVED_WORKSPACE_SUBDOMAINS = ['api', 'docs', 'console', 'admin', 'tunnel', 'proxy'];
 
-export class CreateWorkspace {
-  @IsOptional()
-  @IsString()
-  workspaceName: string | undefined;
-
+export class UpdateWorkspaceSubdomain {
   @IsOptional()
   @Length(1, 63)
   @Matches(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/)
   @IsNotIn(RESERVED_WORKSPACE_SUBDOMAINS, { message: 'This workspace subdomain is reserved.' })
-  workspaceSubdomain?: string | null;
+  subdomain?: string | null;
 }

@@ -12,6 +12,6 @@ export class TunnelController {
   @Post('connect')
   @UseGuards(InternalSecretGuard)
   async connect(@Body() request: RequestConnect) {
-    return await this.tunnelService.sendProxyInfo(request.subdomain, request.token);
+    return await this.tunnelService.sendProxyInfo(request.serviceSubdomain, request.workspaceSubdomain, request.token);
   }
 }

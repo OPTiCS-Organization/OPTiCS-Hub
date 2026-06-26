@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Post, Request, UseGuards, UseInterceptors } from '@nestjs/common';
 import { AuthService } from '../auth.service';
 import { RegisterDTO } from '../dto/register.dto';
 import { LoginDTO } from '../dto/login.dto';
@@ -45,10 +45,15 @@ export class AuthController {
 
   @Get('me')
   @UseGuards(JwtGuard)
-  async credentials() {
+  async credentials(@Request() request: any) {
     const response: GlobalResponse = {
       code: Code.Common.SUCCESS,
-      data: {},
+      data: {
+        user: {
+          userDisplay: request.user.userDisplay,
+          userEmail: request.user.userEmail,
+        },
+      },
       message: 'Verified.'
     }
 
