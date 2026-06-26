@@ -4,7 +4,7 @@ import { PrismaService } from 'src/prisma.service';
 import { AgentGateway } from 'src/agent/agent.gateway';
 import { ConsoleGateway } from 'src/agent/console.gateway';
 import { DeployPreset, Prisma } from '@prisma/client';
-import { ServicePortMapping, ServiceSourceRepository, ServiceSourceInput } from './types/service.type';
+import { ServiceEndpoint, ServicePortMapping, ServiceSourceRepository, ServiceSourceInput } from './types/service.type';
 
 @Injectable()
 export class ServiceService {
@@ -28,6 +28,10 @@ export class ServiceService {
       where: {
         service_index: serviceIndex,
         service_deleted_at: null,
+        workspace: {
+          workspace_owner: owner,
+          workspace_deleted_at: null,
+        },
       },
     });
     if (!rawService) throw new NotFoundException('Service Not Found.');
@@ -35,12 +39,9 @@ export class ServiceService {
     const rawAgent = await this.prismaService.agents.findFirst({
       where: {
         agent_index: rawService.service_parent_agent,
+        agent_parent_workspace: rawService.service_parent_workspace,
         agent_connection: 'linked',
         agent_deleted_at: null,
-        parent: {
-          workspace_owner: owner,
-          workspace_deleted_at: null,
-        },
       },
     });
     if (!rawAgent) throw new NotFoundException('Service Not Found.');
@@ -64,6 +65,19 @@ export class ServiceService {
   private normalizeRootDirectory(rootDirectory: unknown): string | null {
     const value = String(rootDirectory ?? '').trim().replace(/^\/+/, '');
     return value || null;
+  }
+
+  private normalizeServiceSubdomain(subdomain: string | null): string | null {
+    if (subdomain === null) return null;
+    const value = subdomain.trim().toLowerCase();
+    return value === '@' ? '' : value;
+  }
+
+  private assertServiceSubdomainFormat(subdomain: string | null) {
+    if (subdomain === null || subdomain === '') return;
+    if (!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain)) {
+      throw new BadRequestException('Invalid Service Subdomain.');
+    }
   }
 
   private normalizeSourceRepositories(input: unknown, fallbackRootDirectory?: unknown): ServiceSourceRepository[] {
@@ -134,6 +148,110 @@ export class ServiceService {
     return mappings;
   }
 
+  private defaultComponentName(serviceName: string, deployPreset: DeployPreset) {
+    return deployPreset === DeployPreset.compose ? serviceName : 'app';
+  }
+
+  private normalizeEndpoints(
+    input: unknown,
+    portMappings: ServicePortMapping[],
+    serviceName: string,
+    deployPreset: DeployPreset,
+    existingPrimarySubdomain: string | null = null,
+  ): ServiceEndpoint[] {
+    const defaultComponentName = this.defaultComponentName(serviceName, deployPreset);
+    const rawEndpoints = Array.isArray(input) ? input : [];
+    const endpoints: ServiceEndpoint[] = rawEndpoints.map((entry): ServiceEndpoint | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const record = entry as Record<string, unknown>;
+      const hostPort = Number(record.hostPort ?? record.endpointHostPort);
+      const containerPort = Number(record.containerPort ?? record.endpointContainerPort);
+      if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65535) return null;
+      if (!Number.isInteger(containerPort) || containerPort < 1 || containerPort > 65535) return null;
+      return {
+        hostPort,
+        containerPort,
+        componentName: String(record.componentName ?? record.endpointComponentName ?? defaultComponentName).trim() || defaultComponentName,
+        subdomain: this.normalizeServiceSubdomain(record.subdomain === undefined ? null : String(record.subdomain)),
+      };
+    }).filter((entry): entry is ServiceEndpoint => entry !== null);
+
+    if (endpoints.length > 0) return endpoints;
+
+    return portMappings.map((mapping, index) => ({
+      ...mapping,
+      componentName: defaultComponentName,
+      subdomain: index === 0 ? existingPrimarySubdomain : null,
+    }));
+  }
+
+  private async replaceServiceEndpoints(
+    serviceIndex: number,
+    workspaceIndex: number,
+    endpoints: ServiceEndpoint[],
+  ) {
+    const publicSubdomains = endpoints
+      .map(endpoint => endpoint.subdomain)
+      .filter((subdomain): subdomain is string => subdomain !== null && subdomain !== undefined);
+    if (new Set(publicSubdomains).size !== publicSubdomains.length) {
+      throw new ConflictException('Duplicate Endpoint Subdomain.');
+    }
+
+    if (publicSubdomains.length > 0) {
+      const duplicate = await this.prismaService.service_endpoints.findFirst({
+        where: {
+          endpoint_parent_workspace: workspaceIndex,
+          endpoint_parent_service: { not: serviceIndex },
+          endpoint_subdomain: { in: publicSubdomains },
+          endpoint_deleted_at: null,
+        },
+      });
+      if (duplicate) throw new ConflictException('Endpoint Subdomain Already In Use.');
+    }
+
+    await this.prismaService.service_endpoints.deleteMany({
+      where: { endpoint_parent_service: serviceIndex },
+    });
+
+    if (endpoints.length === 0) return;
+
+    await this.prismaService.service_endpoints.createMany({
+      data: endpoints.map(endpoint => ({
+        endpoint_parent_workspace: workspaceIndex,
+        endpoint_parent_service: serviceIndex,
+        endpoint_component_name: endpoint.componentName ?? null,
+        endpoint_subdomain: endpoint.subdomain ?? null,
+        endpoint_host_port: endpoint.hostPort,
+        endpoint_container_port: endpoint.containerPort,
+      })),
+    });
+  }
+
+  private async ensureDefaultComponent(
+    serviceIndex: number,
+    serviceName: string,
+    deployPreset: DeployPreset,
+  ) {
+    const componentName = this.defaultComponentName(serviceName, deployPreset);
+    await this.prismaService.service_components.upsert({
+      where: {
+        component_parent_service_component_name: {
+          component_parent_service: serviceIndex,
+          component_name: componentName,
+        },
+      },
+      create: {
+        component_parent_service: serviceIndex,
+        component_name: componentName,
+        component_container_name: deployPreset === DeployPreset.compose ? null : serviceName.toLowerCase(),
+        component_status: 'waiting',
+      },
+      update: {
+        component_deleted_at: null,
+      },
+    });
+  }
+
   async handleCreateService(
     owner: number,
     body: {
@@ -143,6 +261,7 @@ export class ServiceService {
       serviceContainerPort?: number;
       serviceHostPort?: number;
       servicePortMappings?: ServicePortMapping[];
+      serviceEndpoints?: ServiceEndpoint[];
       serviceSourceUrl: ServiceSourceInput;
       serviceRootDirectory?: string;
       serviceVersion: string;
@@ -168,20 +287,21 @@ export class ServiceService {
 
     const duplicatedService = await this.prismaService.services.findFirst({
       where: {
-        service_parent_agent: body.agentIndex,
+        service_parent_workspace: body.workspaceIdx,
         service_name: body.serviceName,
         service_deleted_at: null,
         service_status: { not: 'removed' },
       },
       select: { service_index: true },
     });
-    if (duplicatedService) throw new ConflictException('Service Name Already Exists on This Agent.');
+    if (duplicatedService) throw new ConflictException('Service Name Already Exists in This Workspace.');
 
     const sourceRepositories = this.normalizeSourceRepositories(body.serviceSourceUrl, body.serviceRootDirectory);
     const sourceUrlStored = this.serializeSourceRepositories(sourceRepositories);
     const hostPort = body.serviceHostPort ?? body.servicePort;
     const containerPort = body.serviceContainerPort ?? body.servicePort;
     const portMappings = this.normalizePortMappings(body.servicePortMappings, hostPort, containerPort);
+    const endpoints = this.normalizeEndpoints(body.serviceEndpoints, portMappings, body.serviceName, body.serviceDeployPreset);
     const primaryPortMapping = portMappings[0];
     const rootDirectory = sourceRepositories[0].rootDirectory;
     const env = this.normalizeEnv(body.env);
@@ -198,9 +318,12 @@ export class ServiceService {
         service_env: env as Prisma.InputJsonObject,
         service_version: body.serviceVersion,
         service_deploy_preset: body.serviceDeployPreset as any,
+        service_parent_workspace: body.workspaceIdx,
         service_parent_agent: body.agentIndex,
       },
     });
+    await this.ensureDefaultComponent(raw.service_index, raw.service_name, raw.service_deploy_preset);
+    await this.replaceServiceEndpoints(raw.service_index, body.workspaceIdx, endpoints);
 
     const sent = this.agentGateway.sendToAgent(agent.agent_uuid, 'command', {
       command: 'DEPLOY',
@@ -249,7 +372,7 @@ export class ServiceService {
         service_deleted_at: scope === 'service' ? new Date() : null,
       },
     });
-    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
 
     return { serviceIndex: rawService.service_index, deleteScope: scope };
   }
@@ -263,6 +386,7 @@ export class ServiceService {
       serviceContainerPort?: number;
       serviceHostPort?: number;
       servicePortMappings?: ServicePortMapping[];
+      serviceEndpoints?: ServiceEndpoint[];
       serviceSourceUrl?: ServiceSourceInput;
       serviceRootDirectory?: string;
       serviceVersion?: string;
@@ -289,6 +413,13 @@ export class ServiceService {
     const portMappings = body.servicePortMappings !== undefined
       ? this.normalizePortMappings(body.servicePortMappings, hostPort, containerPort)
       : existingPortMappings;
+    const existingPrimaryEndpoint = await this.prismaService.service_endpoints.findFirst({
+      where: {
+        endpoint_parent_service: rawService.service_index,
+        endpoint_subdomain: { not: null },
+      },
+      orderBy: { endpoint_index: 'asc' },
+    });
     const primaryPortMapping = portMappings[0];
     const rootDirectory = sourceRepositories[0].rootDirectory;
     const env = body.env !== undefined
@@ -298,7 +429,7 @@ export class ServiceService {
     if (body.serviceName && body.serviceName !== rawService.service_name) {
       const duplicatedService = await this.prismaService.services.findFirst({
         where: {
-          service_parent_agent: rawService.service_parent_agent,
+          service_parent_workspace: rawService.service_parent_workspace,
           service_name: body.serviceName,
           service_deleted_at: null,
           service_status: { not: 'removed' },
@@ -306,7 +437,7 @@ export class ServiceService {
         },
         select: { service_index: true },
       });
-      if (duplicatedService) throw new ConflictException('Service Name Already Exists on This Agent.');
+      if (duplicatedService) throw new ConflictException('Service Name Already Exists in This Workspace.');
     }
 
     const updatedService = await this.prismaService.services.update({
@@ -324,6 +455,15 @@ export class ServiceService {
         service_deploy_preset: (body.serviceDeployPreset ?? rawService.service_deploy_preset) as any,
       },
     });
+    const endpoints = this.normalizeEndpoints(
+      body.serviceEndpoints,
+      portMappings,
+      updatedService.service_name,
+      updatedService.service_deploy_preset,
+      existingPrimaryEndpoint?.endpoint_subdomain ?? rawService.service_subdomain,
+    );
+    await this.ensureDefaultComponent(updatedService.service_index, updatedService.service_name, updatedService.service_deploy_preset);
+    await this.replaceServiceEndpoints(updatedService.service_index, updatedService.service_parent_workspace, endpoints);
 
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'REDEPLOY',
@@ -344,7 +484,7 @@ export class ServiceService {
         where: { service_index: updatedService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
@@ -372,11 +512,11 @@ export class ServiceService {
         where: { service_index: rawService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
-    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
     return { serviceIndex: rawService.service_index };
   }
 
@@ -401,11 +541,11 @@ export class ServiceService {
         where: { service_index: rawService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
-    this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
     return { serviceIndex: rawService.service_index };
   }
 
@@ -427,7 +567,7 @@ export class ServiceService {
         where: { service_index: rawService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
@@ -452,7 +592,7 @@ export class ServiceService {
         where: { service_index: rawService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
@@ -477,7 +617,7 @@ export class ServiceService {
         where: { service_index: rawService.service_index },
         data: { service_status: 'failed' },
       });
-      this.consoleGateway.notifyWorkspaceUpdated(rawAgent.agent_parent_workspace);
+      this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
       this.ensureCommandSent(sent);
     }
 
@@ -486,20 +626,47 @@ export class ServiceService {
 
   async handleUpdateServiceSubdomain(owner: number, serviceIdx: string, subdomain: string | null) {
     const { rawService } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    const normalizedSubdomain = this.normalizeServiceSubdomain(subdomain);
+    this.assertServiceSubdomainFormat(normalizedSubdomain);
 
-    if (subdomain !== null) {
-      const duplicate = await this.prismaService.services.findFirst({
+    if (normalizedSubdomain !== null) {
+      const duplicate = await this.prismaService.service_endpoints.findFirst({
         where: {
-          service_subdomain: subdomain,
-          service_index: { not: rawService.service_index },
+          endpoint_subdomain: normalizedSubdomain,
+          endpoint_parent_workspace: rawService.service_parent_workspace,
+          endpoint_parent_service: { not: rawService.service_index },
+          endpoint_deleted_at: null,
         },
       });
       if (duplicate) throw new ConflictException('Subdomain Already In Use.');
     }
 
+    const primaryEndpoint = await this.prismaService.service_endpoints.findFirst({
+      where: { endpoint_parent_service: rawService.service_index },
+      orderBy: { endpoint_index: 'asc' },
+    });
+
+    if (primaryEndpoint) {
+      await this.prismaService.service_endpoints.update({
+        where: { endpoint_index: primaryEndpoint.endpoint_index },
+        data: { endpoint_subdomain: normalizedSubdomain },
+      });
+    } else if (normalizedSubdomain !== null) {
+      await this.prismaService.service_endpoints.create({
+        data: {
+          endpoint_parent_workspace: rawService.service_parent_workspace,
+          endpoint_parent_service: rawService.service_index,
+          endpoint_component_name: this.defaultComponentName(rawService.service_name, rawService.service_deploy_preset),
+          endpoint_subdomain: normalizedSubdomain,
+          endpoint_host_port: rawService.service_host_port ?? rawService.service_port,
+          endpoint_container_port: rawService.service_container_port ?? rawService.service_port,
+        },
+      });
+    }
+
     const updated = await this.prismaService.services.update({
       where: { service_index: rawService.service_index },
-      data: { service_subdomain: subdomain },
+      data: { service_subdomain: normalizedSubdomain },
     });
 
     return {
@@ -515,39 +682,72 @@ export class ServiceService {
 
     if (!workspace) throw new NotFoundException('Workspace Not Found.');
 
-    const agents = await this.prismaService.agents.findMany({
-      where: { agent_parent_workspace: workspaceIdx, agent_connection: 'linked', agent_deleted_at: null },
-      select: { agent_index: true, agent_code: true, agent_name: true, agent_uuid: true },
-    });
-
-    const agentIndexes = agents.map(a => a.agent_index);
-
     const rawServices = await this.prismaService.services.findMany({
-      where: { service_parent_agent: { in: agentIndexes }, service_deleted_at: null },
+      where: { service_parent_workspace: workspaceIdx, service_deleted_at: null },
       orderBy: { service_created_at: 'desc' },
+      include: {
+        agent: {
+          select: {
+            agent_code: true,
+            agent_name: true,
+            agent_uuid: true,
+          },
+        },
+        components: {
+          where: { component_deleted_at: null },
+          orderBy: { component_index: 'asc' },
+        },
+        endpoints: {
+          where: { endpoint_deleted_at: null },
+          orderBy: { endpoint_index: 'asc' },
+        },
+      },
     });
 
-    const agentMap = new Map(agents.map(a => [a.agent_index, a]));
+    return rawServices.map(s => {
+      const endpointPortMappings = s.endpoints.map(endpoint => ({
+        hostPort: endpoint.endpoint_host_port,
+        containerPort: endpoint.endpoint_container_port,
+      }));
+      const fallbackPortMappings = this.normalizePortMappings((s as any).service_port_mappings, s.service_host_port ?? s.service_port, s.service_container_port ?? s.service_port);
+      const primaryEndpoint = s.endpoints.find(endpoint => endpoint.endpoint_subdomain !== null) ?? s.endpoints[0] ?? null;
 
-    return rawServices.map(s => ({
-      serviceIndex: s.service_index,
-      serviceName: s.service_name,
-      servicePort: s.service_port,
-      serviceHostPort: s.service_host_port ?? s.service_port,
-      serviceContainerPort: s.service_container_port ?? s.service_port,
-      servicePortMappings: this.normalizePortMappings((s as any).service_port_mappings, s.service_host_port ?? s.service_port, s.service_container_port ?? s.service_port),
-      serviceSourceUrl: s.service_source_url,
-      serviceRootDirectory: s.service_root_directory,
-      serviceEnv: this.normalizeEnv(s.service_env),
-      serviceStatus: s.service_status,
-      serviceSubdomain: s.service_subdomain,
-      serviceVersion: s.service_version,
-      serviceDeployPreset: s.service_deploy_preset,
-      serviceCreatedAt: s.service_created_at,
-      agentIndex: s.service_parent_agent,
-      agentCode: agentMap.get(s.service_parent_agent)?.agent_code ?? null,
-      agentName: agentMap.get(s.service_parent_agent)?.agent_name ?? null,
-      agentUuid: agentMap.get(s.service_parent_agent)?.agent_uuid ?? null,
-    }));
+      return {
+        serviceIndex: s.service_index,
+        serviceName: s.service_name,
+        servicePort: s.service_port,
+        serviceHostPort: s.service_host_port ?? s.service_port,
+        serviceContainerPort: s.service_container_port ?? s.service_port,
+        servicePortMappings: endpointPortMappings.length > 0 ? endpointPortMappings : fallbackPortMappings,
+        serviceSourceUrl: s.service_source_url,
+        serviceRootDirectory: s.service_root_directory,
+        serviceEnv: this.normalizeEnv(s.service_env),
+        serviceStatus: s.service_status,
+        serviceSubdomain: primaryEndpoint?.endpoint_subdomain ?? s.service_subdomain,
+        serviceVersion: s.service_version,
+        serviceDeployPreset: s.service_deploy_preset,
+        serviceCreatedAt: s.service_created_at,
+        agentIndex: s.service_parent_agent,
+        agentCode: s.agent?.agent_code ?? null,
+        agentName: s.agent?.agent_name ?? null,
+        agentUuid: s.agent?.agent_uuid ?? null,
+        components: s.components.map(component => ({
+          componentIndex: component.component_index,
+          componentName: component.component_name,
+          containerName: component.component_container_name,
+          status: component.component_status,
+          health: component.component_health,
+          exitCode: component.component_exit_code,
+          updatedAt: component.component_updated_at,
+        })),
+        endpoints: s.endpoints.map(endpoint => ({
+          endpointIndex: endpoint.endpoint_index,
+          componentName: endpoint.endpoint_component_name,
+          subdomain: endpoint.endpoint_subdomain,
+          hostPort: endpoint.endpoint_host_port,
+          containerPort: endpoint.endpoint_container_port,
+        })),
+      };
+    });
   }
 }

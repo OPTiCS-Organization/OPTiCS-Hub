@@ -34,13 +34,18 @@ model refresh_token {
 }
 
 model workspaces {
-  workspace_index      Int       @id @default(autoincrement())
-  workspace_owner      Int
-  workspace_name       String
-  workspace_created_at DateTime  @default(now())
-  workspace_deleted_at DateTime?
-  agents               agents[]
-  owner                users     @relation(fields: [workspace_owner], references: [user_index])
+  workspace_index            Int                 @id @default(autoincrement())
+  workspace_owner            Int
+  workspace_name             String
+  workspace_subdomain        String?
+  workspace_subdomain_active Boolean             @default(false)
+  workspace_dns_record_id    String?
+  workspace_created_at       DateTime            @default(now())
+  workspace_deleted_at       DateTime?
+  agents                     agents[]
+  services                   services[]
+  service_endpoints          service_endpoints[]
+  owner                      users               @relation(fields: [workspace_owner], references: [user_index])
 
   @@unique([workspace_owner, workspace_name])
 }
@@ -60,26 +65,71 @@ model agents {
   agent_created_at       DateTime         @default(now())
   agent_deleted_at       DateTime?
   agent_last_online      DateTime         @default(now())
+  services               services[]
 
   parent workspaces? @relation(fields: [agent_parent_workspace], references: [workspace_index])
 }
 
 model services {
-  service_index          Int           @id @default(autoincrement())
-  service_name           String
-  service_port           Int
-  service_container_port Int?
-  service_host_port      Int?
-  service_source_url     String
-  service_subdomain      String? @unique
-  service_root_directory String?
-  service_env            Json?
-  service_parent_agent   Int
-  service_status         ServiceStatus @default(waiting)
-  service_version        String
-  service_deploy_preset  DeployPreset  @default(dockerfile)
-  service_created_at     DateTime      @default(now())
-  service_deleted_at     DateTime?
+  service_index            Int                  @id @default(autoincrement())
+  service_name             String
+  service_port             Int
+  service_container_port   Int?
+  service_host_port        Int?
+  service_port_mappings    Json?
+  service_source_url       String
+  service_subdomain        String?
+  service_root_directory   String?
+  service_env              Json?
+  service_parent_workspace Int
+  service_parent_agent     Int
+  service_status           ServiceStatus        @default(waiting)
+  service_version          String
+  service_deploy_preset    DeployPreset         @default(dockerfile)
+  service_created_at       DateTime             @default(now())
+  service_deleted_at       DateTime?
+  components               service_components[]
+  endpoints                service_endpoints[]
+
+  workspace workspaces @relation(fields: [service_parent_workspace], references: [workspace_index])
+  agent     agents     @relation(fields: [service_parent_agent], references: [agent_index])
+
+  @@unique([service_parent_workspace, service_subdomain, service_deleted_at])
+}
+
+model service_components {
+  component_index          Int                    @id @default(autoincrement())
+  component_parent_service Int
+  component_name           String
+  component_container_name String?
+  component_status         ServiceComponentStatus @default(waiting)
+  component_health         String?
+  component_exit_code      Int?
+  component_created_at     DateTime               @default(now())
+  component_updated_at     DateTime               @updatedAt
+  component_deleted_at     DateTime?
+
+  service services @relation(fields: [component_parent_service], references: [service_index])
+
+  @@unique([component_parent_service, component_name])
+}
+
+model service_endpoints {
+  endpoint_index            Int       @id @default(autoincrement())
+  endpoint_parent_workspace Int
+  endpoint_parent_service   Int
+  endpoint_component_name   String?
+  endpoint_subdomain        String?
+  endpoint_host_port        Int
+  endpoint_container_port   Int
+  endpoint_created_at       DateTime  @default(now())
+  endpoint_updated_at       DateTime  @updatedAt
+  endpoint_deleted_at       DateTime?
+
+  workspace workspaces @relation(fields: [endpoint_parent_workspace], references: [workspace_index])
+  service   services   @relation(fields: [endpoint_parent_service], references: [service_index])
+
+  @@unique([endpoint_parent_workspace, endpoint_subdomain, endpoint_deleted_at])
 }
 
 enum UserPermission {
@@ -111,6 +161,17 @@ enum ServiceStatus {
   stopped
   failed
   removed
+}
+
+enum ServiceComponentStatus {
+  waiting
+  building
+  starting
+  running
+  stopped
+  failed
+  removed
+  restarting
 }
 
 enum DeployPreset {

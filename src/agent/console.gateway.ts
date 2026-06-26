@@ -111,27 +111,22 @@ export class ConsoleGateway implements OnGatewayConnection {
     const service = await this.prismaService.services.findFirst({
       where: {
         service_index: serviceIndex,
+        service_parent_workspace: workspaceIndex,
         service_deleted_at: null,
-      },
-      select: { service_parent_agent: true },
-    });
-    if (!service) return false;
-
-    const agent = await this.prismaService.agents.findFirst({
-      where: {
-        agent_index: service.service_parent_agent,
-        agent_uuid: agentUuid,
-        agent_connection: 'linked',
-        agent_deleted_at: null,
-        parent: {
+        workspace: {
           workspace_index: workspaceIndex,
           workspace_owner: userIndex,
           workspace_deleted_at: null,
         },
+        agent: {
+          agent_uuid: agentUuid,
+          agent_connection: 'linked',
+          agent_deleted_at: null,
+        },
       },
-      select: { agent_index: true },
+      select: { service_index: true },
     });
-    return Boolean(agent);
+    return Boolean(service);
   }
 
   @SubscribeMessage('subscribe-workspace')
