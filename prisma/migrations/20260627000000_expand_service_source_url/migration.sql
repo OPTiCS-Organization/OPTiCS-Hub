@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE `services` MODIFY `service_source_url` LONGTEXT NOT NULL;

@@ -77,7 +77,7 @@ model services {
   service_container_port   Int?
   service_host_port        Int?
   service_port_mappings    Json?
-  service_source_url       String
+  service_source_url       String               @db.LongText
   service_subdomain        String?
   service_root_directory   String?
   service_env              Json?
