@@ -168,11 +168,13 @@ export class ServiceService {
       const containerPort = Number(record.containerPort ?? record.endpointContainerPort);
       if (!Number.isInteger(hostPort) || hostPort < 1 || hostPort > 65535) return null;
       if (!Number.isInteger(containerPort) || containerPort < 1 || containerPort > 65535) return null;
+      const subdomain = this.normalizeServiceSubdomain(record.subdomain === undefined ? null : String(record.subdomain));
+      this.assertServiceSubdomainFormat(subdomain);
       return {
         hostPort,
         containerPort,
         componentName: String(record.componentName ?? record.endpointComponentName ?? defaultComponentName).trim() || defaultComponentName,
-        subdomain: this.normalizeServiceSubdomain(record.subdomain === undefined ? null : String(record.subdomain)),
+        subdomain,
       };
     }).filter((entry): entry is ServiceEndpoint => entry !== null);
 
@@ -672,6 +674,41 @@ export class ServiceService {
     return {
       serviceIndex: updated.service_index,
       serviceSubdomain: updated.service_subdomain,
+    };
+  }
+
+  async handleUpdateServiceEndpoints(owner: number, serviceIdx: string, serviceEndpoints: ServiceEndpoint[]) {
+    const { rawService } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    const hostPort = rawService.service_host_port ?? rawService.service_port;
+    const containerPort = rawService.service_container_port ?? rawService.service_port;
+    const fallbackPortMappings = this.normalizePortMappings((rawService as any).service_port_mappings, hostPort, containerPort);
+    const endpoints = this.normalizeEndpoints(
+      serviceEndpoints,
+      fallbackPortMappings,
+      rawService.service_name,
+      rawService.service_deploy_preset,
+      rawService.service_subdomain,
+    );
+
+    await this.replaceServiceEndpoints(rawService.service_index, rawService.service_parent_workspace, endpoints);
+
+    const primaryEndpoint = endpoints.find(endpoint => endpoint.subdomain !== null) ?? endpoints[0] ?? null;
+    const updated = await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: { service_subdomain: primaryEndpoint?.subdomain ?? null },
+    });
+
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
+
+    return {
+      serviceIndex: updated.service_index,
+      serviceSubdomain: updated.service_subdomain,
+      endpoints: endpoints.map(endpoint => ({
+        componentName: endpoint.componentName ?? null,
+        subdomain: endpoint.subdomain ?? null,
+        hostPort: endpoint.hostPort,
+        containerPort: endpoint.containerPort,
+      })),
     };
   }
 

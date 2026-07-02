@@ -5,6 +5,7 @@ import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
 import { RedeployService } from '../dto/RedeployService.dto';
 import { UpdateServiceSubdomain } from '../dto/UpdateServiceSubdomain.dto';
+import { UpdateServiceEndpoints } from '../dto/UpdateServiceEndpoints.dto';
 
 @Controller({ path: 'service', version: '1' })
 export class ServiceController {
@@ -138,6 +139,18 @@ export class ServiceController {
       code: Code.Common.SUCCESS,
       data: { service: data },
       message: 'Subdomain Updated Successfully.',
+    };
+    return response;
+  }
+
+  @Patch(':serviceIdx/endpoints')
+  @UseGuards(JwtGuard)
+  async handleUpdateServiceEndpoints(@Request() request: any, @Param('serviceIdx') param: string, @Body() body: UpdateServiceEndpoints) {
+    const data = await this.serviceService.handleUpdateServiceEndpoints(request.user.userIndex, param, body.serviceEndpoints);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Endpoints Updated Successfully.',
     };
     return response;
   }
