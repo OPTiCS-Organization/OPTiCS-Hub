@@ -33,9 +33,6 @@ const controlServer = net.createServer((socket) => {
       socket.pipe(exist.socket);
       exist.socket.pipe(socket);
 
-      socket.once('close', () => exist.socket.destroy());
-      exist.socket.once('close', () => socket.destroy());
-
       console.log(`Token found and removing listener: ${token}`);
     } else {
       register(token, socket, buffer.subarray(idx + 1), () => onClose());
