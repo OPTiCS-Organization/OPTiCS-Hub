@@ -8,6 +8,8 @@ import { CookieInterceptor } from 'src/global/Cookie.intercepter';
 import { GlobalResponse } from 'src/global/GlobalResponse.dto';
 import { Code } from 'src/global/Code.enum';
 import { JwtGuard } from '../interceptor/guard/jwt.guard';
+import { TwoFactorGuard } from '../interceptor/guard/2fa.guard';
+import { MintPurposeTokenDTO } from '../dto/mintPurposeToken.dto';
 
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
@@ -107,6 +109,12 @@ export class AuthController {
       data: response,
       message: 'OK',
     };
+  }
+
+  @Post('2fa')
+  @UseGuards(JwtGuard, TwoFactorGuard)
+  async mintTwoFactorAuthenticationToken(@Request() request: any, @Body() body: MintPurposeTokenDTO) {
+
   }
 
   @Get('me')

@@ -26,10 +26,12 @@ export class ConsoleGateway implements OnGatewayConnection {
     private readonly prismaService: PrismaService,
   ) {}
 
+  /** 모든 Console 클라이언트에 Agent 정보 갱신을 알린다. */
   notifyAgentUpdated() {
     this.server.emit('agent-updated');
   }
 
+  /** 특정 워크스페이스의 Console 클라이언트에 Agent 정보 갱신을 알린다. */
   notifyWorkspaceUpdated(workspaceIndex: number | null) {
     if (!workspaceIndex) {
       this.notifyAgentUpdated();
@@ -38,6 +40,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     this.emitToWorkspace(workspaceIndex, 'agent-updated');
   }
 
+  /** Console 소켓 연결 시 쿠키의 JWT를 검증하고 사용자 식별자를 저장한다. */
   async handleConnection(client: Socket) {
     const accessToken = this.readCookie(client.handshake.headers.cookie, 'accessToken');
     if (!accessToken) {
@@ -53,6 +56,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     }
   }
 
+  /** Cookie 헤더에서 지정한 이름의 값을 찾아 디코딩한다. */
   private readCookie(cookieHeader: string | undefined, name: string): string | null {
     if (!cookieHeader) return null;
     const cookies = cookieHeader.split(';').map(cookie => cookie.trim());
@@ -60,10 +64,12 @@ export class ConsoleGateway implements OnGatewayConnection {
     return target ? decodeURIComponent(target.slice(name.length + 1)) : null;
   }
 
+  /** 워크스페이스별 Socket.IO 룸 이름을 생성한다. */
   private workspaceRoom(workspaceIndex: number): string {
     return `workspace:${workspaceIndex}`;
   }
 
+  /** 연결된 사용자가 해당 워크스페이스의 소유자인지 확인한다. */
   private async canAccessWorkspace(client: Socket, workspaceIndex: number): Promise<boolean> {
     const userIndex = client.data.userIndex as number | undefined;
     if (!userIndex || !Number.isFinite(workspaceIndex)) return false;
@@ -78,6 +84,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     return Boolean(workspace);
   }
 
+  /** 연결된 사용자가 링크된 Agent에 접근할 권한이 있는지 확인한다. */
   private async canAccessAgent(client: Socket, agentUuid: string, workspaceIndex?: number): Promise<boolean> {
     const userIndex = client.data.userIndex as number | undefined;
     if (!userIndex || !agentUuid) return false;
@@ -97,6 +104,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     return Boolean(agent);
   }
 
+  /** 서비스가 사용자의 워크스페이스와 지정한 Agent에 속하는지 확인한다. */
   private async canAccessService(
     client: Socket,
     workspaceIndex: number,
@@ -129,6 +137,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     return Boolean(service);
   }
 
+  /** 워크스페이스 룸에 참여시키고 연결된 Agent의 컨테이너 상태 동기화를 요청한다. */
   @SubscribeMessage('subscribe-workspace')
   async handleSubscribeWorkspace(
     @ConnectedSocket() client: Socket,
@@ -152,10 +161,12 @@ export class ConsoleGateway implements OnGatewayConnection {
     }
   }
 
+  /** 지정한 워크스페이스 룸에 Console 이벤트를 전송한다. */
   emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'service-log-history' | 'service-log-markers' | 'log-load-progress' | 'container-status' | 'response', payload?: object) {
     this.server.to(this.workspaceRoom(workspaceIndex)).emit(event, payload);
   }
 
+  /** Agent 접근 권한을 확인한 뒤 Console 명령을 해당 Agent로 전달한다. */
   @SubscribeMessage('command')
   async handleCommand(
     @ConnectedSocket() client: Socket,
@@ -166,6 +177,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     this.agentGateway.sendToAgent(agentUuid, 'command', rest);
   }
 
+  /** 서비스 접근 권한을 확인하고 실시간 로그 스트리밍을 시작한다. */
   @SubscribeMessage('subscribe-log')
   async handleSubscribeLog(
     @ConnectedSocket() client: Socket,
@@ -183,6 +195,7 @@ export class ConsoleGateway implements OnGatewayConnection {
     });
   }
 
+  /** Agent 접근 권한을 확인하고 실행 중인 로그 스트리밍을 중지한다. */
   @SubscribeMessage('unsubscribe-log')
   async handleUnsubscribeLog(
     @ConnectedSocket() client: Socket,

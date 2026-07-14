@@ -46,7 +46,7 @@ export class AuthService {
       },
     });
 
-    return await this.jwtUtil.sign(user.user_index);
+    return await this.jwtUtil.signLoginTokens(user.user_index);
   }
 
   async login(dto: LoginDTO) {
@@ -65,6 +65,6 @@ export class AuthService {
       );
     }
 
-    return await this.jwtUtil.sign(foundUser.user_index);
+    return await this.jwtUtil.signLoginTokens(foundUser.user_index);
   }
 }
