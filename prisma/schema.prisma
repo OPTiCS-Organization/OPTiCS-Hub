@@ -13,14 +13,18 @@ datasource db {
 }
 
 model users {
-  user_index       Int             @id @default(autoincrement())
-  user_display     String
-  user_email       String          @unique
-  user_password    String
-  user_permission  UserPermission  @default(unverified)
-  user_restriction Boolean         @default(false)
-  workspaces       workspaces[]
-  refreshTokens    refresh_token[]
+  user_index          Int             @id @default(autoincrement())
+  user_display        String
+  user_email          String          @unique
+  user_password       String
+  user_permission     UserPermission  @default(unverified)
+  user_restriction    Boolean         @default(false)
+  user_totp_secret    String?
+  user_totp_active    Boolean         @default(false)
+  last_used_totp_step DateTime?
+  user_totp_active_at DateTime        @default(now())
+  workspaces          workspaces[]
+  refreshTokens       refresh_token[]
 }
 
 model refresh_token {

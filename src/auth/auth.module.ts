@@ -7,6 +7,7 @@ import { JwtUtil } from './util/jwt.util';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './interceptor/strategy/jwt.strategy';
 import { JwtGuard } from './interceptor/guard/jwt.guard';
+import { TwoFactorAuthenticationService } from './2fa.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { JwtGuard } from './interceptor/guard/jwt.guard';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtUtil, JwtStrategy, JwtGuard ],
-  exports: [AuthModule, JwtModule, JwtStrategy, JwtGuard, JwtUtil],
+  providers: [AuthService, JwtUtil, JwtStrategy, JwtGuard, TwoFactorAuthenticationService],
+  exports: [AuthModule, JwtModule, JwtStrategy, JwtGuard, JwtUtil, TwoFactorAuthenticationService],
 })
 export class AuthModule {}
