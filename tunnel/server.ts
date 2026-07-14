@@ -27,7 +27,16 @@ const controlServer = net.createServer((socket) => {
     socket.off('data', onData);
 
     if (exist) {
-      exist.socket.write(buffer.subarray(idx + 1));
+      exist.diagnostics?.onTunnelSetup();
+
+      const responseRemainder = buffer.subarray(idx + 1);
+      if (responseRemainder.length > 0) {
+        exist.diagnostics?.onTtfb();
+      } else if (exist.diagnostics) {
+        socket.once('data', exist.diagnostics.onTtfb);
+      }
+
+      exist.socket.write(responseRemainder);
       socket.write(exist.rest)
 
       socket.pipe(exist.socket);

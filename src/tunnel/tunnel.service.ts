@@ -13,60 +13,119 @@ export class TunnelService {
    * 워크스페이스 서브도메인과 서비스 서브도메인으로 대상 서비스를 찾고,
    * 해당 서비스에 연결된 배포 에이전트로 터널 연결 정보를 전달한다.
    */
-  async sendProxyInfo(serviceSubdomain: string, workspaceSubdomain: string, token: string) {
-    const normalizedServiceSubdomain = serviceSubdomain.trim().toLowerCase() === '@'
-      ? ''
-      : serviceSubdomain.trim().toLowerCase();
-    const workspace = await this.prismaService.workspaces.findFirst({
-      select: {
-        workspace_index: true
-      },
-      where: {
-        workspace_subdomain: workspaceSubdomain,
-        workspace_subdomain_active: true,
-      }
-    });
+  async sendProxyInfo(serviceSubdomain: string, workspaceSubdomain: string, token: string, requestId: string) {
+    const normalizedServiceSubdomain = serviceSubdomain.trim().toLowerCase() === '@' ? '' : serviceSubdomain.trim().toLowerCase();
+    let workspaceQueryMs = 0;
+    let endpointQueryMs = 0;
+    let queryCount = 0;
+    let outcome = 'db_error';
 
-    if (!workspace) throw new NotFoundException('Workspace not found');
-
-    const endpoint = await this.prismaService.service_endpoints.findFirst({
-      select: {
-        endpoint_host_port: true,
-        service: {
+    try {
+      queryCount += 1;
+      const workspace = await measureQuery(
+        () => this.prismaService.workspaces.findFirst({
           select: {
-            service_status: true,
-            agent: {
+            workspace_index: true
+          },
+          where: {
+            workspace_subdomain: workspaceSubdomain,
+            workspace_subdomain_active: true,
+          }
+        }),
+        (durationMs) => { workspaceQueryMs = durationMs; },
+      );
+
+      if (!workspace) {
+        outcome = 'workspace_not_found';
+        throw new NotFoundException('Workspace not found');
+      }
+
+      queryCount += 1;
+      const endpoint = await measureQuery(
+        () => this.prismaService.service_endpoints.findFirst({
+          select: {
+            endpoint_host_port: true,
+            service: {
               select: {
-                agent_uuid: true,
-                agent_connection: true,
-                agent_deleted_at: true,
+                service_status: true,
+                agent: {
+                  select: {
+                    agent_uuid: true,
+                    agent_connection: true,
+                    agent_deleted_at: true,
+                  },
+                },
               },
             },
           },
-        },
-      },
-      where: {
-        endpoint_parent_workspace: workspace.workspace_index,
-        endpoint_subdomain: normalizedServiceSubdomain,
-        endpoint_deleted_at: null,
-        service: {
-          service_deleted_at: null,
-        },
+          where: {
+            endpoint_parent_workspace: workspace.workspace_index,
+            endpoint_subdomain: normalizedServiceSubdomain,
+            endpoint_deleted_at: null,
+            service: {
+              service_deleted_at: null,
+            },
+          }
+        }),
+        (durationMs) => { endpointQueryMs = durationMs; },
+      );
+
+      if (!endpoint) {
+        outcome = 'service_not_found';
+        throw new NotFoundException('Service not found');
       }
-    });
 
-    if (!endpoint) throw new NotFoundException('Service not found');
+      if (!endpoint.service.agent || endpoint.service.agent.agent_connection !== 'linked' || endpoint.service.agent.agent_deleted_at) {
+        outcome = 'agent_not_found';
+        throw new NotFoundException('Agent not found');
+      }
 
-    if (!endpoint.service.agent || endpoint.service.agent.agent_connection !== 'linked' || endpoint.service.agent.agent_deleted_at) {
-      throw new NotFoundException('Agent not found');
+      const response = this.agentGateway.sendToAgent(endpoint.service.agent.agent_uuid, 'tunnel-connect', {
+        'token': token,
+        'service_port': endpoint.endpoint_host_port,
+        'tunnel_port': 5220,
+      });
+
+      if (!response) {
+        outcome = 'agent_offline';
+        throw new ServiceUnavailableException('Agent is probably offline');
+      }
+
+      outcome = 'success';
+      return {
+        request_id: requestId,
+        hub_db_query_ms: roundMilliseconds(workspaceQueryMs + endpointQueryMs),
+        workspace_query_ms: roundMilliseconds(workspaceQueryMs),
+        endpoint_query_ms: roundMilliseconds(endpointQueryMs),
+      };
+    } finally {
+      console.info(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        component: 'hub',
+        event: 'hub_tunnel_db_queries_completed',
+        request_id: requestId,
+        outcome,
+        query_count: queryCount,
+        hub_db_query_ms: roundMilliseconds(workspaceQueryMs + endpointQueryMs),
+        workspace_query_ms: roundMilliseconds(workspaceQueryMs),
+        endpoint_query_ms: roundMilliseconds(endpointQueryMs),
+      }));
     }
+  }
+}
 
-    const response = this.agentGateway.sendToAgent(endpoint.service.agent.agent_uuid, 'tunnel-connect', {
-      'token': token,
-      'service_port': endpoint.endpoint_host_port,
-      'tunnel_port': 5220,
-    });
+function roundMilliseconds(value: number) {
+  return Math.round(value * 100) / 100;
+}
 
-    if (!response) throw new ServiceUnavailableException('Agent is probably offline');
+async function measureQuery<T>(
+  query: () => Promise<T>,
+  recordDuration: (durationMs: number) => void,
+) {
+  const startedAt = performance.now();
+  try {
+    return await query();
+  } finally {
+    recordDuration(performance.now() - startedAt);
   }
 }
