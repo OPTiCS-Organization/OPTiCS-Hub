@@ -2,6 +2,7 @@ import {
   ConnectedSocket,
   MessageBody,
   OnGatewayConnection,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -12,10 +13,22 @@ import { AgentGateway } from './agent.gateway';
 import log from 'spectra-log';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma.service';
+import { JwtUtil } from 'src/auth/util/jwt.util';
+import { TokenPurpose } from 'src/auth/types/TokenPurpose.type';
+import { randomUUID } from 'crypto';
+
+type TerminalSession = {
+  consoleSocketId: string;
+  agentUuid: string;
+};
+
+type MetricRequest = TerminalSession & {
+  timer: NodeJS.Timeout;
+};
 
 @Injectable()
 @WebSocketGateway({ namespace: '/console', cors: { origin: true, credentials: true } })
-export class ConsoleGateway implements OnGatewayConnection {
+export class ConsoleGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
 
@@ -23,8 +36,13 @@ export class ConsoleGateway implements OnGatewayConnection {
     @Inject(forwardRef(() => AgentGateway))
     private readonly agentGateway: AgentGateway,
     private readonly jwtService: JwtService,
+    private readonly jwtUtil: JwtUtil,
     private readonly prismaService: PrismaService,
   ) {}
+
+  private readonly terminalSessions = new Map<string, TerminalSession>();
+  private readonly metricRequests = new Map<string, MetricRequest>();
+  private readonly consumedTerminalTokens = new Set<string>();
 
   /** 모든 Console 클라이언트에 Agent 정보 갱신을 알린다. */
   notifyAgentUpdated() {
@@ -53,6 +71,20 @@ export class ConsoleGateway implements OnGatewayConnection {
       client.data.userIndex = payload.userIndex;
     } catch {
       client.disconnect(true);
+    }
+  }
+
+  handleDisconnect(client: Socket) {
+    for (const [sessionId, session] of this.terminalSessions) {
+      if (session.consoleSocketId !== client.id) continue;
+      this.agentGateway.sendToAgent(session.agentUuid, 'terminal-close', { sessionId });
+      this.terminalSessions.delete(sessionId);
+    }
+
+    for (const [requestId, request] of this.metricRequests) {
+      if (request.consoleSocketId !== client.id) continue;
+      clearTimeout(request.timer);
+      this.metricRequests.delete(requestId);
     }
   }
 
@@ -208,4 +240,172 @@ export class ConsoleGateway implements OnGatewayConnection {
       serviceName: payload.serviceName,
     });
   }
+
+  @SubscribeMessage('agent-metrics-request')
+  async handleAgentMetricsRequest(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { agentUuid: string },
+  ) {
+    if (!(await this.canAccessAgent(client, payload.agentUuid))) {
+      return { ok: false, error: 'Agent access denied.' };
+    }
+
+    const requestId = randomUUID();
+    const timer = setTimeout(() => this.metricRequests.delete(requestId), 5000);
+    this.metricRequests.set(requestId, {
+      consoleSocketId: client.id,
+      agentUuid: payload.agentUuid,
+      timer,
+    });
+
+    if (!this.agentGateway.sendToAgent(payload.agentUuid, 'system-metrics-request', { requestId })) {
+      clearTimeout(timer);
+      this.metricRequests.delete(requestId);
+      return { ok: false, error: 'Agent is offline.' };
+    }
+
+    return { ok: true };
+  }
+
+  @SubscribeMessage('terminal-open')
+  async handleTerminalOpen(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { token: string; cols?: number; rows?: number },
+  ) {
+    try {
+      const token = await this.jwtUtil.verifyPurposeToken(payload.token, TokenPurpose.TERMINAL_SSH);
+      const userIndex = Number(token.sub);
+      const socketUserIndex = client.data.userIndex as number | undefined;
+
+      if (!token.jti || this.consumedTerminalTokens.has(token.jti)) {
+        return { ok: false, error: 'Terminal token was already used.' };
+      }
+      if (!token.agentUuid || userIndex !== socketUserIndex) {
+        return { ok: false, error: 'Terminal token does not match this session.' };
+      }
+      if (!(await this.canAccessAgent(client, token.agentUuid))) {
+        return { ok: false, error: 'Agent access denied.' };
+      }
+
+      const sessionId = randomUUID();
+      this.consumedTerminalTokens.add(token.jti);
+      const tokenLifetimeMs = Math.max(1000, ((token.exp ?? Math.floor(Date.now() / 1000) + 60) * 1000) - Date.now());
+      setTimeout(() => this.consumedTerminalTokens.delete(token.jti), tokenLifetimeMs);
+      this.terminalSessions.set(sessionId, {
+        consoleSocketId: client.id,
+        agentUuid: token.agentUuid,
+      });
+
+      const sent = this.agentGateway.sendToAgent(token.agentUuid, 'terminal-open', {
+        sessionId,
+        cols: clampDimension(payload.cols, 80),
+        rows: clampDimension(payload.rows, 24),
+      });
+      if (!sent) {
+        this.terminalSessions.delete(sessionId);
+        return { ok: false, error: 'Agent is offline.' };
+      }
+
+      return { ok: true, sessionId };
+    } catch {
+      return { ok: false, error: 'Terminal authorization failed.' };
+    }
+  }
+
+  @SubscribeMessage('terminal-input')
+  handleTerminalInput(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string; data: string },
+  ) {
+    const session = this.ownedTerminalSession(client, payload.sessionId);
+    if (!session || typeof payload.data !== 'string' || Buffer.byteLength(payload.data) > 64 * 1024) return;
+    this.agentGateway.sendToAgent(session.agentUuid, 'terminal-input', payload);
+  }
+
+  @SubscribeMessage('terminal-resize')
+  handleTerminalResize(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string; cols?: number; rows?: number },
+  ) {
+    const session = this.ownedTerminalSession(client, payload.sessionId);
+    if (!session) return;
+    this.agentGateway.sendToAgent(session.agentUuid, 'terminal-resize', {
+      sessionId: payload.sessionId,
+      cols: clampDimension(payload.cols, 80),
+      rows: clampDimension(payload.rows, 24),
+    });
+  }
+
+  @SubscribeMessage('terminal-close')
+  handleTerminalClose(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string },
+  ) {
+    const session = this.ownedTerminalSession(client, payload.sessionId);
+    if (!session) return;
+    this.agentGateway.sendToAgent(session.agentUuid, 'terminal-close', payload);
+    this.terminalSessions.delete(payload.sessionId);
+  }
+
+  forwardSystemMetrics(agentUuid: string, payload: { requestId: string; metrics: unknown }) {
+    const request = this.metricRequests.get(payload.requestId);
+    if (!request || request.agentUuid !== agentUuid) return;
+    clearTimeout(request.timer);
+    this.metricRequests.delete(payload.requestId);
+    this.server.to(request.consoleSocketId).emit('agent-metrics', {
+      agentUuid,
+      metrics: payload.metrics,
+    });
+  }
+
+  forwardTerminalReady(agentUuid: string, payload: { sessionId: string }) {
+    const session = this.agentTerminalSession(agentUuid, payload.sessionId);
+    if (!session) return;
+    this.server.to(session.consoleSocketId).emit('terminal-ready', payload);
+  }
+
+  forwardTerminalOutput(agentUuid: string, payload: { sessionId: string; data: string }) {
+    const session = this.agentTerminalSession(agentUuid, payload.sessionId);
+    if (!session || typeof payload.data !== 'string') return;
+    this.server.to(session.consoleSocketId).emit('terminal-output', payload);
+  }
+
+  forwardTerminalClosed(agentUuid: string, payload: { sessionId: string; reason?: string }) {
+    const session = this.agentTerminalSession(agentUuid, payload.sessionId);
+    if (!session) return;
+    this.terminalSessions.delete(payload.sessionId);
+    this.server.to(session.consoleSocketId).emit('terminal-closed', payload);
+  }
+
+  closeAgentConnections(agentUuid: string) {
+    for (const [sessionId, session] of this.terminalSessions) {
+      if (session.agentUuid !== agentUuid) continue;
+      this.terminalSessions.delete(sessionId);
+      this.server.to(session.consoleSocketId).emit('terminal-closed', {
+        sessionId,
+        reason: 'Agent disconnected.',
+      });
+    }
+
+    for (const [requestId, request] of this.metricRequests) {
+      if (request.agentUuid !== agentUuid) continue;
+      clearTimeout(request.timer);
+      this.metricRequests.delete(requestId);
+    }
+  }
+
+  private ownedTerminalSession(client: Socket, sessionId: string) {
+    const session = this.terminalSessions.get(sessionId);
+    return session?.consoleSocketId === client.id ? session : null;
+  }
+
+  private agentTerminalSession(agentUuid: string, sessionId: string) {
+    const session = this.terminalSessions.get(sessionId);
+    return session?.agentUuid === agentUuid ? session : null;
+  }
+}
+
+function clampDimension(value: number | undefined, fallback: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return Math.min(500, Math.max(1, Math.floor(value)));
 }

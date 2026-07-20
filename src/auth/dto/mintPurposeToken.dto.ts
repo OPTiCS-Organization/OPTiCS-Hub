@@ -1,5 +1,13 @@
-import { TokenPurpose } from "../types/TokenPurpose.type";
+import { IsEnum, IsUUID, Matches } from 'class-validator';
+import { TokenPurpose } from '../types/TokenPurpose.type';
 
 export class MintPurposeTokenDTO {
-    purpose: TokenPurpose;
+  @IsEnum(TokenPurpose)
+  purpose: TokenPurpose;
+
+  @IsUUID()
+  agentUuid: string;
+
+  @Matches(/^\d{6}$/)
+  totpCode: string;
 }

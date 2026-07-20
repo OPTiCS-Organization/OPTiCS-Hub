@@ -131,6 +131,46 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.consoleGateway.emitToWorkspace(workspaceIndex, 'response', payload as object);
   }
 
+  @SubscribeMessage('system-metrics')
+  handleSystemMetrics(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { requestId: string; metrics: unknown },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    this.consoleGateway.forwardSystemMetrics(agentUuid, payload);
+  }
+
+  @SubscribeMessage('terminal-ready')
+  handleTerminalReady(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    this.consoleGateway.forwardTerminalReady(agentUuid, payload);
+  }
+
+  @SubscribeMessage('terminal-output')
+  handleTerminalOutput(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string; data: string },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    this.consoleGateway.forwardTerminalOutput(agentUuid, payload);
+  }
+
+  @SubscribeMessage('terminal-closed')
+  handleTerminalClosed(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { sessionId: string; reason?: string },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    this.consoleGateway.forwardTerminalClosed(agentUuid, payload);
+  }
+
   @SubscribeMessage('container-status')
   async handleContainerStatus(
     @ConnectedSocket() client: Socket,
@@ -279,6 +319,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
     if (agentCode && agentUuid) {
       if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
+      this.consoleGateway.closeAgentConnections(agentUuid);
       this.agentUuidToSocketId.delete(agentUuid);
       this.scheduleOffline(agentUuid);
     }

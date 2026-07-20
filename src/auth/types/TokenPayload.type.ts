@@ -1,8 +1,9 @@
-import { TokenPurpose } from "./TokenPurpose.type"
+import { TokenPurpose } from './TokenPurpose.type';
 
 export type TokenPayload = {
-    sub: string;
-    purpose: TokenPurpose;
-    jti: string;
-    agentUuid?: string;
-}
+  sub: string;
+  purpose: TokenPurpose;
+  jti: string;
+  exp?: number;
+  agentUuid?: string;
+};
