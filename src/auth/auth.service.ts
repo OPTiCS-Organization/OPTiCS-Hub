@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { RegisterDTO } from './dto/register.dto';
 import { CheckEmailDTO } from './dto/check-email.dto';
 import { JwtUtil } from './util/jwt.util';
@@ -6,6 +6,8 @@ import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDTO } from './dto/login.dto';
 import { PrismaService } from 'src/prisma.service';
+import { MintPurposeTokenDTO } from './dto/mintPurposeToken.dto';
+import { TokenPurpose } from './types/TokenPurpose.type';
 
 @Injectable()
 export class AuthService {
@@ -66,5 +68,32 @@ export class AuthService {
     }
 
     return await this.jwtUtil.signLoginTokens(foundUser.user_index);
+  }
+
+  async mintPurposeToken(userIndex: number, dto: MintPurposeTokenDTO) {
+    if (dto.purpose !== TokenPurpose.TERMINAL_SSH) {
+      throw new BadRequestException('Unsupported token purpose.');
+    }
+
+    const agent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_uuid: dto.agentUuid,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: userIndex,
+          workspace_deleted_at: null,
+        },
+      },
+      select: { agent_uuid: true },
+    });
+
+    if (!agent) {
+      throw new ForbiddenException('Agent access denied.');
+    }
+
+    return this.jwtUtil.signPurposeToken(userIndex, dto.purpose, {
+      agentUuid: agent.agent_uuid,
+    });
   }
 }

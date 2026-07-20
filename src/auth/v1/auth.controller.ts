@@ -114,7 +114,12 @@ export class AuthController {
   @Post('2fa')
   @UseGuards(JwtGuard, TwoFactorGuard)
   async mintTwoFactorAuthenticationToken(@Request() request: any, @Body() body: MintPurposeTokenDTO) {
-
+    const token = await this.authService.mintPurposeToken(request.user.userIndex, body);
+    return {
+      code: Code.Common.SUCCESS,
+      data: { token },
+      message: 'Terminal access granted.',
+    };
   }
 
   @Get('me')

@@ -13,6 +13,16 @@ const TOKEN_TTL_CONFIG: Record<TokenPurpose, string> = {
   [TokenPurpose.TERMINAL_SSH]: 'SECURITY_TERMINAL_SSH_TTL',
   [TokenPurpose.VERIFY_REGISTER_TOTP]: 'SECURITY_VERIFY_REGISTER_TOTP_TTL',
 };
+
+const LEGACY_TOKEN_TTL_CONFIG: Partial<Record<TokenPurpose, string>> = {
+  [TokenPurpose.ACCESS]: 'SECURITY_ACCESS_EXPIRE_TIME',
+  [TokenPurpose.REFRESH]: 'SECURITY_REFRESH_EXPIRE_TIME',
+};
+
+const DEFAULT_TOKEN_TTL: Partial<Record<TokenPurpose, TokenTtl>> = {
+  [TokenPurpose.TERMINAL_SSH]: '2m',
+  [TokenPurpose.VERIFY_REGISTER_TOTP]: '5m',
+};
 @Injectable()
 export class JwtUtil {
   constructor(
@@ -104,6 +114,15 @@ export class JwtUtil {
   /** 토큰 목적에 대응하는 환경 변수에서 TTL 설정을 가져온다. */
   private getTokenTtl(purpose: TokenPurpose): TokenTtl {
     const configKey = TOKEN_TTL_CONFIG[purpose];
+    const configured = this.configService.get<TokenTtl>(configKey);
+    if (configured) return configured;
+
+    const legacyConfigKey = LEGACY_TOKEN_TTL_CONFIG[purpose];
+    if (legacyConfigKey) return this.configService.getOrThrow<TokenTtl>(legacyConfigKey);
+
+    const defaultTtl = DEFAULT_TOKEN_TTL[purpose];
+    if (defaultTtl) return defaultTtl;
+
     return this.configService.getOrThrow<TokenTtl>(configKey);
   }
 }
