@@ -6,6 +6,7 @@ import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDTO } from './dto/login.dto';
 import { PrismaService } from 'src/prisma.service';
+import { MailerService } from 'src/mailer/mailer.service';
 
 @Injectable()
 export class AuthService {
@@ -13,6 +14,7 @@ export class AuthService {
     private readonly jwtUtil: JwtUtil,
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
+    private readonly mailerService: MailerService,
   ) {}
 
   async checkEmail(dto: CheckEmailDTO) {
@@ -34,6 +36,8 @@ export class AuthService {
     ) {
       throw new ConflictException('Already Using Email.');
     }
+
+    this.mailerService.sendTo("noreply@google.com");
 
     const user = await this.prismaService.users.create({
       data: {

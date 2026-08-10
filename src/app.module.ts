@@ -28,7 +28,7 @@ import { MailerModule } from './mailer/mailer.module';
     AgentModule,
     TunnelModule,
     UtilityModule,
-    MailerModule,
+    MailerModule.forRootAsync(),
   ],
   controllers: [WorkspaceController],
   providers: [
