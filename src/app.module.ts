@@ -15,6 +15,7 @@ import { AgentModule } from './agent/agent.module';
 import { TunnelModule } from './tunnel/tunnel.module';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
 import { UtilityModule } from './utility/utility.module';
+import { MailerModule } from './mailer/mailer.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { UtilityModule } from './utility/utility.module';
     AgentModule,
     TunnelModule,
     UtilityModule,
+    MailerModule,
   ],
   controllers: [WorkspaceController],
   providers: [
