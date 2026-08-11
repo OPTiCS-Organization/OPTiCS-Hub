@@ -1,9 +1,10 @@
-import { IsEmail, IsNotEmpty, IsString, Length } from "class-validator";
+import { IsAscii, IsEmail, IsNotEmpty, IsString, Length } from "class-validator";
 
 export class RegisterDTO {
   @IsNotEmpty()
-  @IsEmail()
-  email: string;
+  @IsString()
+  @IsAscii()
+  verificationCode: string
 
   @IsNotEmpty()
   @IsString()
