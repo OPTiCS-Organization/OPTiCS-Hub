@@ -17,14 +17,25 @@ model users {
   user_display        String
   user_email          String          @unique
   user_password       String
-  user_permission     UserPermission  @default(unverified)
+  user_permission     UserPermission  @default(verified)
   user_restriction    Boolean         @default(false)
   user_totp_secret    String?
   user_totp_active    Boolean         @default(false)
-  last_used_totp_step DateTime?
-  user_totp_active_at DateTime        @default(now())
+  last_used_totp_step Int?
+  user_totp_active_at DateTime?
   workspaces          workspaces[]
   refreshTokens       refresh_token[]
+}
+
+model verification {
+  verification_index       Int       @id @default(autoincrement())
+  verification_email       String
+  verification_code        String
+  verification_created_at  DateTime  @default(now())
+  verification_last_sent_at DateTime @default(now())
+  verification_consumed_at DateTime?
+
+  @@index([verification_email, verification_created_at])
 }
 
 model refresh_token {
@@ -140,7 +151,7 @@ enum UserPermission {
   unverified
   verified
   moderator
-  administratorServices
+  administrator
 }
 
 enum ConnectionStatus {
