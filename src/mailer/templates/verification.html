@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <meta name="supported-color-schemes" content="dark">
+    <title>OPTiCS Email Verification</title>
+    <style>
+        @media only screen and (max-width:480px) {
+            .optics-card { padding:30px 22px 26px !important; }
+            .optics-title { font-size:23px !important; }
+        }
+    </style>
+</head>
+
+<body style="margin:0; padding:0; background-color:#151210;">
+
+    <div style="display:none; max-height:0; overflow:hidden; opacity:0;">
+        인증 링크를 클릭해 회원가입을 마무리하세요. 요청 시각 기준 {{expiresInMinutes}}분간 유효합니다.
+    </div>
+
+    <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color:#151210;">
+        <tr>
+            <td align="center" style="padding:56px 16px;">
+
+                <table role="presentation" width="440" border="0" cellpadding="0" cellspacing="0" style="width:440px; max-width:100%;">
+                    <tr>
+                        <td class="optics-card" style="background-color:#232020; border:1px solid #393431; border-radius:8px; padding:38px 32px 32px;">
+
+                            <p class="optics-title" style="margin:0 0 14px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:27px; font-weight:700; color:#eae7e4; letter-spacing:-0.8px; line-height:1.3;">
+                                이메일 주소 인증
+                            </p>
+
+                            <p style="margin:0 0 26px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:15px; line-height:1.9; color:#aaa4a0;">
+                                안녕하세요, OPTiCS 입니다.<br>
+                                아래 버튼을 눌러 남은 회원가입 단계를 완료해 주세요.
+                            </p>
+
+                            <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:26px; background-color:#2b2826; border:1px solid #393431; border-radius:4px;">
+                                <tr>
+                                    <td style="padding:14px 16px;">
+                                        <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                                            <tr>
+                                                <td width="72" style="padding-bottom:9px; vertical-align:top; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:12px; line-height:1.7; color:#918b87; letter-spacing:0.2px; white-space:nowrap;">
+                                                    인증 대상
+                                                </td>
+                                                <td style="padding-bottom:9px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:13px; line-height:1.7; color:#eae7e4; word-break:break-all;">
+                                                    {{email}}
+                                                </td>
+                                            </tr>
+                                            <tr>
+                                                <td width="72" style="vertical-align:top; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:12px; line-height:1.7; color:#918b87; letter-spacing:0.2px; white-space:nowrap;">
+                                                    요청 시각
+                                                </td>
+                                                <td style="font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:12px; line-height:1.7; color:#aaa4a0;">
+                                                    {{requestedAt}}
+                                                </td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-bottom:26px;">
+                                <tr>
+                                    <td align="center" bgcolor="#fd7a28" style="border-radius:4px;">
+                                        <a href="{{verificationUrl}}" style="display:block; padding:15px 24px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:15px; font-weight:600; color:#ffffff; text-decoration:none; border-radius:4px; letter-spacing:-0.2px;">
+                                            이메일 인증하기
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="margin:0 0 28px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:12px; line-height:1.9; color:#918b87;">
+                                이 인증 링크는 <span style="color:#eae7e4; font-weight:600;">요청 시각 기준 {{expiresInMinutes}}분간</span> 유효합니다.<br>
+                                본인이 요청한 것이 아니라면 이 메일을 무시하셔도 됩니다.
+                            </p>
+
+                            <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                                <tr><td height="1" bgcolor="#393431" style="height:1px; font-size:0; line-height:0;">&nbsp;</td></tr>
+                            </table>
+
+                            <p style="margin:26px 0 11px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:12px; line-height:1.9; color:#918b87;">
+                                버튼이 동작하지 않으면 아래 주소를 브라우저에 붙여넣어 주세요.
+                            </p>
+
+                            <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td style="background-color:#2b2826; border:1px solid #393431; border-radius:4px; padding:11px 13px;">
+                                        <a href="{{verificationUrl}}" style="font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px; line-height:1.65; color:#aaa4a0; text-decoration:none; word-break:break-all;">
+                                            {{verificationUrl}}
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td align="center" style="padding-top:22px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:11px; line-height:2; color:#918b87;">
+                            발신 전용 메일입니다. 문의는 <a href="mailto:support@optics.run" style="color:#fd7a28; text-decoration:none;">support@optics.run</a> 으로 보내주세요.<br>
+                            OPTiCS는 어떤 경우에도 비밀번호를 묻지 않습니다.
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td align="center" style="padding-top:14px; font-family:-apple-system,'Segoe UI','Apple SD Gothic Neo','Malgun Gothic',Arial,sans-serif; font-size:10px; line-height:1.6; color:#918b87;">
+                            &copy; {{year}} OPTiCS
+                        </td>
+                    </tr>
+                </table>
+
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

@@ -12,4 +12,10 @@ export default registerAs('mail', () => ({
         noreply: undefined,
         support: process.env.MAIL_REPLY_TO ?? 'support@optics.run',
     } as Record<MailSender, string | undefined>,
+
+    consoleBaseUrl: process.env.CONSOLE_BASE_URL ?? 'https://console.optics.run',
+
+    verificationTtlMinutes: Number(process.env.MAIL_VERIFICATION_TTL_MINUTES ?? 10),
+
+    verificationResendCooldownSeconds: Number(process.env.MAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS ?? 90),
 }));
