@@ -1,13 +1,35 @@
 import { Socket } from "net";
 
-const localClientSocket: Map<string, { socket: Socket, rest: Buffer, timer: NodeJS.Timeout }> = new Map();
+export type RequestDiagnostics = {
+  requestId: string;
+  startedAt: number;
+  method: string;
+  host: string;
+  onTunnelSetup: () => void;
+  onTtfb: () => void;
+};
 
-export function register(token: string, socket: Socket, rest: Buffer, onTimeout: () => void) {
+type RegistryEntry = {
+  socket: Socket;
+  rest: Buffer;
+  timer: NodeJS.Timeout;
+  diagnostics?: RequestDiagnostics;
+};
+
+const localClientSocket: Map<string, RegistryEntry> = new Map();
+
+export function register(
+  token: string,
+  socket: Socket,
+  rest: Buffer,
+  onTimeout: () => void,
+  diagnostics?: RequestDiagnostics,
+) {
   const timer = setTimeout(() => {
     localClientSocket.delete(token);
     onTimeout();
   }, 10_000);
-  localClientSocket.set(token, {socket, rest, timer});
+  localClientSocket.set(token, { socket, rest, timer, diagnostics });
 }
 
 export function claim(token: string) {

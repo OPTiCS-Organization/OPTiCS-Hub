@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//source/ketchup/Project/OPTiCS/OPTiCS-Agent/**)",
+      "Read(//source/ketchup/Project/OPTiCS/OPTiCS-Agent/src/**)",
+      "Bash(echo \"hub exit: $?\")",
+      "Bash(echo \"console exit: $?\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' --max-time 10 https://rdap.org/domain/__TRACKED_VAR__)",
+      "Bash(curl -sL -o /dev/null -w '%{http_code}' --max-time 15 https://rdap.identitydigital.services/rdap/domain/__TRACKED_VAR__)"
+    ]
+  }
+}

@@ -13,24 +13,25 @@ datasource db {
 }
 
 model users {
-  user_index       Int             @id @default(autoincrement())
-  user_display     String
-  user_email       String          @unique
-  user_password    String
-  user_permission  UserPermission  @default(verified)
-  user_restriction Boolean         @default(false)
-  workspaces       workspaces[]
-  refreshTokens    refresh_token[]
+  user_index          Int             @id @default(autoincrement())
+  user_display        String
+  user_email          String          @unique
+  user_password       String
+  user_permission     UserPermission  @default(verified)
+  user_restriction    Boolean         @default(false)
+  user_totp_secret    String?
+  user_totp_active    Boolean         @default(false)
+  last_used_totp_step Int?
+  user_totp_active_at DateTime?
+  workspaces          workspaces[]
+  refreshTokens       refresh_token[]
 }
 
 model verification {
   verification_index       Int       @id @default(autoincrement())
   verification_email       String
   verification_code        String
-  // 코드 발급 시각. 만료(TTL) 계산의 기준이며 재전송해도 바뀌지 않는다.
   verification_created_at  DateTime  @default(now())
-  // 이 코드를 마지막으로 메일 발송한 시각. 재전송 쿨다운 계산의 기준.
-  // created_at 과 분리하지 않으면 같은 코드를 재전송할 때 쿨다운이 무력화된다.
   verification_last_sent_at DateTime @default(now())
   verification_consumed_at DateTime?
 

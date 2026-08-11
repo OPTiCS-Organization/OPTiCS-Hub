@@ -72,7 +72,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     const errorResponse = exception.getResponse() as
       | string
-      | { errorCode: string; message: string | string[] };
+      | { message: string | string[]; [key: string]: unknown };
 
     if (typeof errorResponse === 'string') {
       errorMessage = errorResponse;
@@ -82,13 +82,21 @@ export class HttpExceptionFilter implements ExceptionFilter {
         : errorResponse.message;
     }
 
-    const responseBody = this.createResponseBody(errorMessage, statusCode);
+    const responseBody = this.createResponseBody(errorResponse, errorMessage, statusCode);
 
     response.status(statusCode).json(responseBody);
   }
 
-  private createResponseBody(message: string, error: string) {
+  private createResponseBody(
+    errorResponse: string | { [key: string]: unknown },
+    message: string,
+    error: number,
+  ) {
+    const extra =
+      typeof errorResponse === 'object' && errorResponse !== null ? errorResponse : {};
+
     return {
+      ...extra,
       message,
       error,
     };

@@ -1,15 +1,20 @@
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { UserPermission } from '@prisma/client';
 import { RegisterDTO } from './dto/register.dto';
+import { ChangePasswordDTO } from './dto/change-password.dto';
 import { CheckEmailDTO } from './dto/check-email.dto';
 import { JwtUtil } from './util/jwt.util';
 import bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
 import { LoginDTO } from './dto/login.dto';
 import { PrismaService } from 'src/prisma.service';
+import { MintPurposeTokenDTO } from './dto/mintPurposeToken.dto';
+import { TokenPurpose } from './types/TokenPurpose.type';
 import { MailerService } from 'src/mailer/mailer.service';
 import { VerifyEmailDTO } from './dto/verify.dto';
 import { IsValidVerificationCodeDTO } from './dto/isValidVerificationCode.dto';
+import { TwoFactorAuthenticationService } from './2fa.service';
+import { Code } from 'src/global/Code.enum';
 
 @Injectable()
 export class AuthService {
@@ -18,6 +23,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
     private readonly mailerService: MailerService,
+    private readonly twoFactorAuthenticationService: TwoFactorAuthenticationService,
   ) {}
 
   async checkEmail(dto: CheckEmailDTO) {
@@ -252,7 +258,7 @@ export class AuthService {
       }),
     ]);
 
-    return await this.jwtUtil.sign(user.user_index);
+    return await this.jwtUtil.signLoginTokens(user.user_index);
   }
 
   async login(dto: LoginDTO) {
@@ -271,6 +277,77 @@ export class AuthService {
       );
     }
 
-    return await this.jwtUtil.sign(foundUser.user_index);
+    // 2FA 확인은 비밀번호가 일치한 이후에만 검사하도록 합니다.
+    // 2FA를 먼저 물으면 코드 요구 여부만으로 해당 이메일의 가입 여부와 2FA 사용 여부가 유출됩니다.
+    if (foundUser.user_totp_active) {
+      if (!dto.totpCode) {
+        throw new UnauthorizedException({
+          code: Code.Authentication.TOTP_REQUIRED,
+          message: 'TOTP code is required.',
+        });
+      }
+
+      // 실패 시 UnauthorizedException을 던지고, 성공하면 사용한 time step을 기록해 같은 TOTP 코드로 다시 로그인하는 것을 막는다.
+      await this.twoFactorAuthenticationService.verifyActiveUserTotp(
+        foundUser.user_index,
+        dto.totpCode,
+      );
+    }
+
+    return await this.jwtUtil.signLoginTokens(foundUser.user_index);
+  }
+
+  /**
+   * 로그인 상태에서 비밀번호를 변경합니다. 본인 확인을 위해 기존 비밀번호를 함께 요구합니다.
+   * 기존 비밀번호 불일치는 401로 응답합니다 (콘솔이 강제 로그아웃 콜백 없이 이 요청을 보내므로 안전합니다).
+   */
+  async changePassword(userIndex: number, dto: ChangePasswordDTO) {
+    if (dto.newPassword !== dto.newPasswordConfirm) {
+      throw new BadRequestException('Password Confirm Does Not Match.');
+    }
+
+    const user = await this.prismaService.users.findFirst({ where: { user_index: userIndex } });
+    if (!user) throw new UnauthorizedException('User Not Found.');
+
+    if (!(await bcrypt.compare(dto.currentPassword, user.user_password))) {
+      throw new UnauthorizedException('Current Password Does Not Match.');
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      dto.newPassword,
+      parseInt(this.configService.getOrThrow('SECURITY_SALT_ROUND')),
+    );
+
+    await this.prismaService.users.update({
+      where: { user_index: userIndex },
+      data: { user_password: hashedPassword },
+    });
+  }
+
+  async mintPurposeToken(userIndex: number, dto: MintPurposeTokenDTO) {
+    if (dto.purpose !== TokenPurpose.TERMINAL_SSH) {
+      throw new BadRequestException('Unsupported token purpose.');
+    }
+
+    const agent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_uuid: dto.agentUuid,
+        agent_connection: 'linked',
+        agent_deleted_at: null,
+        parent: {
+          workspace_owner: userIndex,
+          workspace_deleted_at: null,
+        },
+      },
+      select: { agent_uuid: true },
+    });
+
+    if (!agent) {
+      throw new ForbiddenException('Agent access denied.');
+    }
+
+    return this.jwtUtil.signPurposeToken(userIndex, dto.purpose, {
+      agentUuid: agent.agent_uuid,
+    });
   }
 }
