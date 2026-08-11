@@ -12,6 +12,8 @@ import { TokenPurpose } from './types/TokenPurpose.type';
 import { MailerService } from 'src/mailer/mailer.service';
 import { VerifyEmailDTO } from './dto/verify.dto';
 import { IsValidVerificationCodeDTO } from './dto/isValidVerificationCode.dto';
+import { TwoFactorAuthenticationService } from './2fa.service';
+import { Code } from 'src/global/Code.enum';
 
 @Injectable()
 export class AuthService {
@@ -20,6 +22,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly prismaService: PrismaService,
     private readonly mailerService: MailerService,
+    private readonly twoFactorAuthenticationService: TwoFactorAuthenticationService,
   ) {}
 
   async checkEmail(dto: CheckEmailDTO) {
@@ -270,6 +273,23 @@ export class AuthService {
     ) {
       throw new ConflictException(
         'Matching Email and Password Not Found.',
+      );
+    }
+
+    // 2FA 확인은 비밀번호가 일치한 이후에만 검사하도록 합니다.
+    // 2FA를 먼저 물으면 코드 요구 여부만으로 해당 이메일의 가입 여부와 2FA 사용 여부가 유출됩니다.
+    if (foundUser.user_totp_active) {
+      if (!dto.totpCode) {
+        throw new UnauthorizedException({
+          code: Code.Authentication.TOTP_REQUIRED,
+          message: 'TOTP code is required.',
+        });
+      }
+
+      // 실패 시 UnauthorizedException을 던지고, 성공하면 사용한 time step을 기록해 같은 TOTP 코드로 다시 로그인하는 것을 막는다.
+      await this.twoFactorAuthenticationService.verifyActiveUserTotp(
+        foundUser.user_index,
+        dto.totpCode,
       );
     }
 
