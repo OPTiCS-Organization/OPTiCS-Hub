@@ -77,6 +77,7 @@ model agents {
   agent_parent_workspace Int?
   agent_connection       ConnectionStatus @default(unlinked)
   agent_status           AgentStatus      @default(waiting)
+  agent_version          String?
   agent_created_at       DateTime         @default(now())
   agent_deleted_at       DateTime?
   agent_last_online      DateTime         @default(now())
