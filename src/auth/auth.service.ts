@@ -1,4 +1,5 @@
-import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { UserPermission } from '@prisma/client';
 import { RegisterDTO } from './dto/register.dto';
 import { CheckEmailDTO } from './dto/check-email.dto';
 import { JwtUtil } from './util/jwt.util';
@@ -35,11 +36,31 @@ export class AuthService {
 
     if (user) throw new ConflictException('Already exists');
 
+    const verification = await this.issueOrReuseVerification(dto.email);
+
+    // 메일에 표시할 "요청 시각"은 발급 시각이다. 재전송이어도 최초 발급 시각을 보여줘야
+    // 본문의 "요청 시각 기준 N분간 유효" 안내와 실제 만료가 일치한다.
+    await this.mailerService.sendVerification(
+      dto.email,
+      verification.verification_code,
+      verification.verification_created_at,
+    );
+
+    return;
+  }
+
+  /**
+   * 인증 코드를 발급하거나, 아직 쓸 만한 코드가 있으면 그것을 재사용합니다.
+   * 쿨다운에 걸리면 429를 던집니다.
+   *
+   * 신규 가입과 기존 사용자 인증이 같은 정책을 쓰므로 여기 한 곳에 모읍니다.
+   */
+  private async issueOrReuseVerification(email: string) {
     // 재발송 제한. 마지막으로 보낸 시각이 기준이다.
     const cooldownSeconds = this.configService.getOrThrow<number>('mail.verificationResendCooldownSeconds');
 
     const lastSent = await this.prismaService.verification.findFirst({
-      where: { verification_email: dto.email },
+      where: { verification_email: email },
       orderBy: { verification_last_sent_at: 'desc' },
     });
 
@@ -62,7 +83,7 @@ export class AuthService {
 
     const reusable = await this.prismaService.verification.findFirst({
       where: {
-        verification_email: dto.email,
+        verification_email: email,
         verification_consumed_at: null,
         verification_created_at: { gte: reusableAfter },
       },
@@ -77,22 +98,85 @@ export class AuthService {
         })
       : await this.prismaService.verification.create({
           data: {
-            verification_email: dto.email,
+            verification_email: email,
             verification_code: crypto.randomUUID(),
           },
         });
 
     if (!verification) throw new InternalServerErrorException('Failed to creating verification. Please try again later.');
 
-    // 메일에 표시할 "요청 시각"은 발급 시각이다. 재전송이어도 최초 발급 시각을 보여줘야
-    // 본문의 "요청 시각 기준 N분간 유효" 안내와 실제 만료가 일치한다.
-    await this.mailerService.sendVerification(
-      dto.email,
+    return verification;
+  }
+
+  /**
+   * 이메일 인증 도입 이전에 가입한 기존 사용자가 자기 주소로 인증 메일을 요청합니다.
+   *
+   * 대상 주소를 요청 본문이 아니라 로그인 토큰에서 가져옵니다.
+   * 본문으로 받으면 아무나 남의 가입 주소로 메일을 보낼 수 있습니다.
+   */
+  async requestExistingEmailVerification(userIndex: number) {
+    const user = await this.prismaService.users.findFirst({
+      where: { user_index: userIndex },
+    });
+
+    if (!user) throw new UnauthorizedException('User Not Found.');
+
+    if (user.user_permission !== UserPermission.unverified) {
+      throw new ConflictException('Email Already Verified.');
+    }
+
+    const verification = await this.issueOrReuseVerification(user.user_email);
+
+    await this.mailerService.sendVerificationForExisting(
+      user.user_email,
       verification.verification_code,
       verification.verification_created_at,
     );
 
     return;
+  }
+
+  /**
+   * 기존 사용자가 메일로 받은 코드로 인증을 완료합니다.
+   *
+   * 로그인 상태를 요구하지 않습니다. 코드 자체가 메일함 소유를 증명하고,
+   * 사용자가 메일을 연 기기에서 바로 링크를 누를 수 있어야 하기 때문입니다.
+   */
+  async verifyExistingEmail(dto: IsValidVerificationCodeDTO) {
+    const verification = await this.prismaService.verification.findFirst({
+      where: {
+        verification_code: dto.verificationCode,
+        verification_consumed_at: null,
+        verification_created_at: { gte: this.verificationIssuedAfter() },
+      },
+      orderBy: { verification_created_at: 'desc' },
+    });
+
+    if (!verification) {
+      throw new BadRequestException('Invalid or Expired Verification Code.');
+    }
+
+    const user = await this.prismaService.users.findFirst({
+      where: { user_email: verification.verification_email },
+    });
+
+    // 코드는 유효한데 계정이 없다면 신규 가입용 코드다. 이 경로로 처리하면 안 된다.
+    if (!user) throw new BadRequestException('No Account For This Verification Code.');
+
+    // 권한 승격과 코드 소진은 한 트랜잭션이어야 한다.
+    // 따로 하면 소진 처리가 실패했을 때 이미 쓴 코드가 계속 유효하게 남는다.
+    await this.prismaService.$transaction([
+      this.prismaService.users.update({
+        where: { user_index: user.user_index },
+        data: { user_permission: UserPermission.verified },
+      }),
+      this.prismaService.verification.update({
+        where: { verification_index: verification.verification_index },
+        data: { verification_consumed_at: new Date() },
+      }),
+    ]);
+
+    return { email: user.user_email };
   }
 
   /**

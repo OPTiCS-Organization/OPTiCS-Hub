@@ -49,6 +49,38 @@ export class AuthController {
     return response;
   }
 
+  /**
+   * 이메일 인증 도입 이전에 가입한 사용자가 자기 주소로 인증 메일을 요청한다.
+   * 대상 주소는 본문이 아니라 로그인 토큰에서 가져오므로 JwtGuard 가 필수다.
+   */
+  @Post('request-existing-verification')
+  @UseGuards(JwtGuard)
+  async requestExistingVerification(@Request() request: any) {
+    await this.authService.requestExistingEmailVerification(request.user.userIndex);
+
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Verification Email Sent.',
+    };
+
+    return response;
+  }
+
+  /** 기존 사용자가 메일로 받은 코드로 인증을 완료한다. 로그인 상태를 요구하지 않는다. */
+  @Post('verify-existing-email')
+  async verifyExistingEmail(@Body() body: IsValidVerificationCodeDTO) {
+    const result = await this.authService.verifyExistingEmail(body);
+
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: result,
+      message: 'Email Verified.',
+    };
+
+    return response;
+  }
+
   @Post('register')
   @UseInterceptors(CookieInterceptor)
   async register(@Body() body: RegisterDTO) {

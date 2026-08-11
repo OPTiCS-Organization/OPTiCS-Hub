@@ -24,7 +24,7 @@ export class MailerService implements OnModuleInit {
      */
     onModuleInit() {
         // 읽어올 템플릿 목록. 파일을 추가하면 여기에도 그 파일의 이름을 추가해야 함.
-        for (const name of ['verification']) {
+        for (const name of ['verification', 'verificationForExisting']) {
             // 경로 기준은 실행 위치(process.cwd())가 아니라 이 파일 위치(__dirname).
             // .html은 nestjs 컴파일러의 컴파일 대상이 아니라서 nest-cli.json의 assets 설정으로 dist에 복사하도록 해야 함.
             this.templates.set(name, readFileSync(join(__dirname, 'templates', `${name}.html`), 'utf-8'));
@@ -102,6 +102,40 @@ export class MailerService implements OnModuleInit {
         ].join('\n');
 
         return this.send(MailSender.NOREPLY, to, '[OPTiCS] 이메일 주소 인증', html, text);
+    }
+
+    /**
+     * 이메일 인증 도입 이전에 가입한 기존 사용자에게 인증을 요청하는 메일입니다.
+     *
+     * 신규 가입용 링크와 쿼리 파라미터를 다르게 씁니다(verify-existing).
+     * 콘솔이 "가입 폼을 띄울지" "로그인된 계정을 인증 처리할지" 구분해야 하기 때문입니다.
+     */
+    async sendVerificationForExisting(to: string, verificationCode: string, requestedAt: Date) {
+        const { consoleBaseUrl, verificationTtlMinutes } = this.config;
+
+        const verificationUrl = `${consoleBaseUrl}/auth?verify-existing=${encodeURIComponent(verificationCode)}`;
+
+        const html = this.render('verificationForExisting', {
+            verificationUrl,
+            expiresInMinutes: String(verificationTtlMinutes),
+            email: to,
+            requestedAt: formatKst(requestedAt),
+            year: String(new Date().getFullYear()),
+        });
+
+        const text = [
+            '이메일 인증이 필요합니다',
+            '',
+            '이메일 인증 절차가 새로 도입되었습니다. 아래 주소로 접속해 인증을 마쳐 주세요.',
+            verificationUrl,
+            '',
+            `인증 대상: ${to}`,
+            `요청 시각: ${formatKst(requestedAt)}`,
+            `이 링크는 요청 시각 기준 ${verificationTtlMinutes}분간 유효합니다.`,
+            '인증을 마치기 전까지 계정과 기존 데이터는 그대로 유지됩니다.',
+        ].join('\n');
+
+        return this.send(MailSender.NOREPLY, to, '[OPTiCS] 이메일 인증이 필요합니다', html, text);
     }
 }
 
