@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Delete, Get, Post, Request, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Patch, Post, Request, UseGuards, UseInterceptors } from '@nestjs/common';
 import { TwoFactorAuthenticationService } from '../2fa.service';
 import { AuthService } from '../auth.service';
 import { RegisterDTO } from '../dto/register.dto';
+import { ChangePasswordDTO } from '../dto/change-password.dto';
 import { LoginDTO } from '../dto/login.dto';
 import { CheckEmailDTO } from '../dto/check-email.dto';
 import { VerifyEmailDTO } from '../dto/verify.dto';
@@ -203,5 +204,19 @@ export class AuthController {
     }
 
     return response
+  }
+
+  @Patch('password')
+  @UseGuards(JwtGuard)
+  async changePassword(@Request() request: any, @Body() body: ChangePasswordDTO) {
+    await this.authService.changePassword(request.user.userIndex, body);
+
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Password changed successfully.',
+    };
+
+    return response;
   }
 }

@@ -1,6 +1,7 @@
 import { ForbiddenException, BadRequestException, ConflictException, HttpException, HttpStatus, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { UserPermission } from '@prisma/client';
 import { RegisterDTO } from './dto/register.dto';
+import { ChangePasswordDTO } from './dto/change-password.dto';
 import { CheckEmailDTO } from './dto/check-email.dto';
 import { JwtUtil } from './util/jwt.util';
 import bcrypt from 'bcrypt';
@@ -294,6 +295,33 @@ export class AuthService {
     }
 
     return await this.jwtUtil.signLoginTokens(foundUser.user_index);
+  }
+
+  /**
+   * 로그인 상태에서 비밀번호를 변경합니다. 본인 확인을 위해 기존 비밀번호를 함께 요구합니다.
+   * 기존 비밀번호 불일치는 401로 응답합니다 (콘솔이 강제 로그아웃 콜백 없이 이 요청을 보내므로 안전합니다).
+   */
+  async changePassword(userIndex: number, dto: ChangePasswordDTO) {
+    if (dto.newPassword !== dto.newPasswordConfirm) {
+      throw new BadRequestException('Password Confirm Does Not Match.');
+    }
+
+    const user = await this.prismaService.users.findFirst({ where: { user_index: userIndex } });
+    if (!user) throw new UnauthorizedException('User Not Found.');
+
+    if (!(await bcrypt.compare(dto.currentPassword, user.user_password))) {
+      throw new UnauthorizedException('Current Password Does Not Match.');
+    }
+
+    const hashedPassword = await bcrypt.hash(
+      dto.newPassword,
+      parseInt(this.configService.getOrThrow('SECURITY_SALT_ROUND')),
+    );
+
+    await this.prismaService.users.update({
+      where: { user_index: userIndex },
+      data: { user_password: hashedPassword },
+    });
   }
 
   async mintPurposeToken(userIndex: number, dto: MintPurposeTokenDTO) {
