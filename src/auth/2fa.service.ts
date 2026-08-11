@@ -1,11 +1,9 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { generateSecret, generateURI, verify } from 'otplib';
 import QRCode from 'qrcode';
+import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
-
-const TOTP_EPOCH_TOLERANCE_SECONDS = 30;
-const TOTP_PERIOD_SECONDS = 30;
 
 type TotpVerifySuccess = {
   epoch: number;
@@ -14,17 +12,39 @@ type TotpVerifySuccess = {
 
 @Injectable()
 export class TwoFactorAuthenticationService {
-  TOTP_EPOCH_TOLERANCE_SECONDS: number | undefined = undefined;
-  TOTP_PERIOD_SECONDS: number | undefined = undefined;
+  private readonly epochToleranceSeconds: number;
+  private readonly periodSeconds: number;
+
   constructor(
     private readonly prismaService: PrismaService,
-    private readonly configSerivce: ConfigService,
+    private readonly configService: ConfigService,
   ) {
-    this.TOTP_EPOCH_TOLERANCE_SECONDS = configSerivce.getOrThrow<number>("TOTP_EPOCH_TOLERANCE_SECONDS");
-    this.TOTP_PERIOD_SECONDS = configSerivce.getOrThrow<number>("TOTP_EPOCH_TOLERANCE_SECONDS");
+    this.epochToleranceSeconds = Number(
+      configService.getOrThrow<string>('TOTP_EPOCH_TOLERANCE_SECONDS'),
+    );
+    this.periodSeconds = Number(configService.getOrThrow<string>('TOTP_PERIOD_SECONDS'));
+
+    // 주기가 0이면 getTimeStep 이 0으로 나눠 Infinity 를 만들고 재사용 방지가 되지 않습니다.
+    if (!Number.isFinite(this.periodSeconds) || this.periodSeconds <= 0) {
+      throw new Error('TOTP_PERIOD_SECONDS must be a positive number.');
+    }
+    if (!Number.isFinite(this.epochToleranceSeconds) || this.epochToleranceSeconds < 0) {
+      throw new Error('TOTP_EPOCH_TOLERANCE_SECONDS must be a non-negative number.');
+    }
   }
 
   public async generate2FASecret(userEmail: string) {
+    const user = await this.prismaService.users.findUnique({
+      where: { user_email: userEmail },
+      select: { user_totp_active: true },
+    });
+
+    // 이미 켜져 있으면 재등록을 방지합니다...
+    // 2FA setup 호출만으로 TOTP 확인 없이 2FA가 비활성화되어 세션을 탈취한 쪽이 disconnect의 TOTP 코드 요구를 우회할 수 있습니다.
+    if (user?.user_totp_active) {
+      throw new ConflictException('Disable the existing 2FA before setting up a new one.');
+    }
+
     // 인증 앱에 등록할 사용자별 Base32 secret 생성.
     const secret = generateSecret();
 
@@ -158,14 +178,16 @@ export class TwoFactorAuthenticationService {
       throw new UnauthorizedException('TOTP is not active.');
     }
 
-    // 시계 오차는 앞뒤 30초까지 허용함.
+    // 시계 오차 허용 범위는 설정 값을 따르도록 합니다.
     const result = await verify({
       secret: user.user_totp_secret,
       token,
-      epochTolerance: TOTP_EPOCH_TOLERANCE_SECONDS,
-      // 마지막으로 성공한 time step 이하의 코드는 거절해서 같은 30초 코드 재사용 막음.
+      epochTolerance: this.epochToleranceSeconds,
+      // 마지막으로 성공한 time step 이하의 코드는 거절해서 같은 주기의 TOTP 코드 재사용을 방지합니다.
       afterTimeStep: user.last_used_totp_step ?? undefined,
     });
+
+    log(`${result.valid}, `)
 
     if (!result.valid) {
       throw new UnauthorizedException('Invalid TOTP code.');
@@ -176,6 +198,12 @@ export class TwoFactorAuthenticationService {
 
   private getTimeStep(result: TotpVerifySuccess) {
     // otplib 런타임은 timeStep을 주지만 타입에 없을 수 있어서 epoch로 보정함.
-    return result.timeStep ?? Math.floor(result.epoch / TOTP_PERIOD_SECONDS);
+    const step = result.timeStep ?? Math.floor(result.epoch / this.periodSeconds);
+
+    if (!Number.isFinite(step)) {
+      throw new InternalServerErrorException('Failed to resolve TOTP time step.');
+    }
+
+    return step;
   }
 }
