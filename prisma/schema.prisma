@@ -26,6 +26,7 @@ model users {
 model verification {
   verification_index       Int       @id @default(autoincrement())
   verification_email       String
+  verification_code        String
   verification_created_at  DateTime  @default(now())
   verification_consumed_at DateTime?
 }
