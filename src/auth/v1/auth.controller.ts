@@ -116,6 +116,8 @@ export class AuthController {
         user: {
           userDisplay: request.user.userDisplay,
           userEmail: request.user.userEmail,
+          // 콘솔이 미인증 사용자에게 인증 안내를 띄우려면 이 값이 필요하다.
+          userPermission: request.user.userPermission,
         },
       },
       message: 'Verified.'
