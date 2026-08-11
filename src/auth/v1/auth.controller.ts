@@ -20,7 +20,7 @@ export class AuthController {
   }
 
   /** 가입하려는 주소로 인증 메일을 보낸다. 쿨다운 중이면 429 와 남은 초를 돌려준다. */
-  @Post('verify-email')
+  @Post('verify')
   async verifyEmail(@Body() body: VerifyEmailDTO) {
     await this.authService.verifyEmail(body);
 
@@ -34,7 +34,7 @@ export class AuthController {
   }
 
   /** 메일 링크의 코드가 아직 쓸 수 있는지 확인한다. 가입 폼을 띄우기 전에 호출한다. */
-  @Post('is-valid-verification-code')
+  @Post('verify/check')
   async isValidVerificationCode(@Body() body: IsValidVerificationCodeDTO) {
     const result = await this.authService.isValidVerificationCode(body);
 
@@ -53,7 +53,7 @@ export class AuthController {
    * 이메일 인증 도입 이전에 가입한 사용자가 자기 주소로 인증 메일을 요청한다.
    * 대상 주소는 본문이 아니라 로그인 토큰에서 가져오므로 JwtGuard 가 필수다.
    */
-  @Post('request-existing-verification')
+  @Post('verify/me')
   @UseGuards(JwtGuard)
   async requestExistingVerification(@Request() request: any) {
     await this.authService.requestExistingEmailVerification(request.user.userIndex);
@@ -68,7 +68,7 @@ export class AuthController {
   }
 
   /** 기존 사용자가 메일로 받은 코드로 인증을 완료한다. 로그인 상태를 요구하지 않는다. */
-  @Post('verify-existing-email')
+  @Post('verify/confirm')
   async verifyExistingEmail(@Body() body: IsValidVerificationCodeDTO) {
     const result = await this.authService.verifyExistingEmail(body);
 
