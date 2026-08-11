@@ -58,7 +58,7 @@ export class AgentService implements OnModuleInit {
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  public async registerAgent(ip: string, agentUuid: string | null): Promise<{ agentCode: string, agentUuid: string, agentIp: string, agentParentWorkspace: number | null }> {
+  public async registerAgent(ip: string, agentUuid: string | null, agentVersion: string | null = null): Promise<{ agentCode: string, agentUuid: string, agentIp: string, agentParentWorkspace: number | null }> {
     const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp: string, agentParentWorkspace: number | null } = {
       agentCode: undefined,
       agentUuid: undefined,
@@ -85,6 +85,7 @@ export class AgentService implements OnModuleInit {
             agent_status: 'online',
             agent_ip: ip,
             agent_last_online: new Date(),
+            agent_version: agentVersion,
           },
         });
         agent.agentCode = updatedAgent.agent_code;
@@ -99,6 +100,7 @@ export class AgentService implements OnModuleInit {
             agent_name: newCode,
             agent_connection: 'unlinked',
             agent_status: 'online',
+            agent_version: agentVersion,
           },
         });
         agent.agentCode = newAgent.agent_code;
@@ -114,6 +116,7 @@ export class AgentService implements OnModuleInit {
           agent_name: newCode,
           agent_connection: 'unlinked',
           agent_status: 'online',
+          agent_version: agentVersion,
         },
       });
       agent.agentCode = newAgent.agent_code;
@@ -155,7 +158,8 @@ export class AgentService implements OnModuleInit {
       agentCreatedAt: a.agent_created_at,
       agentLastOnline: a.agent_last_online,
       workspaceName: a.parent?.workspace_name ?? null,
-      agentUuid: a.agent_uuid
+      agentUuid: a.agent_uuid,
+      agentVersion: a.agent_version,
     }));
   }
 

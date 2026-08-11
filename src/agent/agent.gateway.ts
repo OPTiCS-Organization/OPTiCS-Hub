@@ -296,13 +296,13 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('register')
-  async handleValidation(client: Socket, payload: { agentUuid: string | null }) {
+  async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion?: string | null }) {
     log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
     log(payload)
     const rawIp = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace(/^::ffff:/, '');
 
-    const agent = await this.agentService.registerAgent(ip, payload.agentUuid);
+    const agent = await this.agentService.registerAgent(ip, payload.agentUuid, payload.agentVersion ?? null);
 
     this.clearOfflineTimer(agent.agentUuid);
     this.agentUuidToSocketId.set(agent.agentUuid, client.id);
