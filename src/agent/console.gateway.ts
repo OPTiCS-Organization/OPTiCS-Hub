@@ -27,7 +27,8 @@ type MetricRequest = TerminalSession & {
 };
 
 @Injectable()
-@WebSocketGateway({ namespace: '/console', cors: { origin: true, credentials: true } })
+/** CORS·Origin 검증은 OriginCheckingIoAdapter가 서버 단위로 처리한다. */
+@WebSocketGateway({ namespace: '/console' })
 export class ConsoleGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
