@@ -5,6 +5,7 @@ import { AgentGateway } from 'src/agent/agent.gateway';
 import { ConsoleGateway } from 'src/agent/console.gateway';
 import { DeployPreset, Prisma } from '@prisma/client';
 import { ServiceEndpoint, ServicePortMapping, ServiceSourceRepository, ServiceSourceInput } from './types/service.type';
+import { RedeployService } from './dto/RedeployService.dto';
 
 @Injectable()
 export class ServiceService {
@@ -14,7 +15,7 @@ export class ServiceService {
     private readonly consoleGateway: ConsoleGateway,
   ) { };
 
-  private parseServiceIndex(serviceIdx: string) {
+  private parseServiceIndex(serviceIdx: string | number) {
     const parsed = Number(serviceIdx);
     if (!Number.isInteger(parsed) || parsed < 1) {
       throw new BadRequestException('Invalid Service Index.');
@@ -22,7 +23,8 @@ export class ServiceService {
     return parsed;
   }
 
-  private async findOwnedServiceAndAgent(owner: number, serviceIdx: string) {
+  /** TODO: serviceIdx 타입 number로 변경 */
+  private async findOwnedServiceAndAgent(owner: number, serviceIdx: string | number) {
     const serviceIndex = this.parseServiceIndex(serviceIdx);
     const rawService = await this.prismaService.services.findFirst({
       where: {
@@ -379,24 +381,37 @@ export class ServiceService {
     return { serviceIndex: rawService.service_index, deleteScope: scope };
   }
 
+  /**
+   * 재배포 시 Workspace는 변경할 수 없음
+   * 기존 Agent와 다른 Agent에 배포 할 때 기존 Agent에서 데이터를 이전할 수 없음
+   * @param owner 
+   * @param serviceIdx 
+   * @param body 
+   * @returns 
+   */
   async handleRedeployService(
     owner: number,
     serviceIdx: string,
-    body: {
-      serviceName?: string;
-      servicePort?: number;
-      serviceContainerPort?: number;
-      serviceHostPort?: number;
-      servicePortMappings?: ServicePortMapping[];
-      serviceEndpoints?: ServiceEndpoint[];
-      serviceSourceUrl?: ServiceSourceInput;
-      serviceRootDirectory?: string;
-      serviceVersion?: string;
-      serviceDeployPreset?: DeployPreset;
-      env?: Record<string, string>;
-    },
+    body: RedeployService,
   ) {
+    /* Service를 소유한 Agent를 찾음 */
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    // 변경 대상 Agent를 찾음
+    const targetAgent = await this.prismaService.agents.findFirst({
+      where: {
+        agent_index: body.agentIndex,
+        agent_parent_workspace: rawAgent.agent_parent_workspace,
+      },
+      select: {
+        agent_uuid: true,
+      }
+    });
+
+    if (!targetAgent) throw new NotFoundException('Target agent not found.');
+    
+    // 배포 대상 Agent가 변경되었다면, 기존 Agent에서 동작중인 Service 중지
+    if (body.agentIndex && rawService.service_parent_agent !== body.agentIndex) await this.handleStopService(owner, String(rawService.service_index));
 
     const rawSourceUrlForUpdate = body.serviceSourceUrl ?? rawService.service_source_url;
     const parsedSourceUrlForUpdate = (() => {
@@ -467,7 +482,10 @@ export class ServiceService {
     await this.ensureDefaultComponent(updatedService.service_index, updatedService.service_name, updatedService.service_deploy_preset);
     await this.replaceServiceEndpoints(updatedService.service_index, updatedService.service_parent_workspace, endpoints);
 
-    const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
+
+    // 배포 대상 Agent가 변경되어도 REDEPLOY 명령은 DEPLOY 명령과 동일하게 동작함.
+    // REDEPLOY 명령은 기존에 동작중인 컨테이너를 중지하는 프로세스를 추가로 가지고 있음.
+    const sent = this.agentGateway.sendToAgent(targetAgent.agent_uuid, 'command', {
       command: 'REDEPLOY',
       serviceIndex: updatedService.service_index,
       sourceUrl: sourceUrlForAgent,
