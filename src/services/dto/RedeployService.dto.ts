@@ -1,5 +1,6 @@
 import { IsArray, IsEnum, IsNumber, IsObject, IsOptional, IsString } from 'class-validator';
 import { DeployPreset } from '@prisma/client';
+import { ServiceEndpoint } from '../types/service.type';
 
 export class ServicePortMapping {
   @IsNumber()
@@ -19,6 +20,10 @@ export class SourceRepository {
 }
 
 export class RedeployService {
+  @IsOptional()
+  @IsNumber()
+  agentIndex?: number;
+
   @IsOptional()
   @IsString()
   serviceName?: string;
@@ -57,4 +62,8 @@ export class RedeployService {
   @IsOptional()
   @IsObject()
   env?: Record<string, string>;
+
+  @IsOptional()
+  @IsArray()
+  serviceEndpoints?: ServiceEndpoint[];
 }
