@@ -407,6 +407,7 @@ export class ServiceService {
       },
       select: {
         agent_uuid: true,
+        agent_index: true,
       }
     });
 
@@ -473,6 +474,7 @@ export class ServiceService {
         service_source_url: sourceUrlStored,
         service_root_directory: rootDirectory,
         service_env: env as Prisma.InputJsonObject,
+        service_parent_agent: targetAgent.agent_index,
         service_version: body.serviceVersion ?? rawService.service_version,
         service_deploy_preset: (body.serviceDeployPreset ?? rawService.service_deploy_preset) as any,
       },
