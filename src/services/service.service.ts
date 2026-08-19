@@ -384,10 +384,10 @@ export class ServiceService {
   /**
    * 재배포 시 Workspace는 변경할 수 없음
    * 기존 Agent와 다른 Agent에 배포 할 때 기존 Agent에서 데이터를 이전할 수 없음
-   * @param owner 
-   * @param serviceIdx 
-   * @param body 
-   * @returns 
+   * @param owner
+   * @param serviceIdx
+   * @param body
+   * @returns
    */
   async handleRedeployService(
     owner: number,
@@ -402,16 +402,21 @@ export class ServiceService {
       where: {
         agent_index: body.agentIndex,
         agent_parent_workspace: rawAgent.agent_parent_workspace,
+        agent_status: 'online',
+        agent_deleted_at: null,
       },
       select: {
         agent_uuid: true,
       }
     });
 
-    if (!targetAgent) throw new NotFoundException('Target agent not found.');
-    
-    // 배포 대상 Agent가 변경되었다면, 기존 Agent에서 동작중인 Service 중지
-    if (body.agentIndex && rawService.service_parent_agent !== body.agentIndex) await this.handleStopService(owner, String(rawService.service_index));
+    // Target Agent가 Online인지 확인해야 함
+
+    if (!targetAgent) throw new NotFoundException('Target agent is offline or deleted.');
+
+    // 배포 대상 Agent가 변경되었고, 기존 Agent가 온라인인 경우, 해당 Agent에서 동작중인 Service 중지
+    if (body.agentIndex && rawService.service_parent_agent !== body.agentIndex && rawAgent.agent_status == 'online')
+      await this.handleStopService(owner, String(rawService.service_index));
 
     const rawSourceUrlForUpdate = body.serviceSourceUrl ?? rawService.service_source_url;
     const parsedSourceUrlForUpdate = (() => {
