@@ -48,7 +48,8 @@
     "resend": "^6.18.1",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3",
-    "spectra-log": "^2.0.0-b"
+    "spectra-log": "^2.0.0-b",
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",

@@ -9,15 +9,65 @@
  * Agent 터널 소켓을 그대로 연결해서 TCP 바이트를 양방향으로 흘려보낸다.
  */
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
 import { randomUUID } from 'crypto';
 import { register, release } from '../tunnel/registry.ts';
 import dotenv from 'dotenv';
+import { ulid } from 'ulid';
 dotenv.config({ path: '../OPTiCS-Infra/env/gateway.env' })
+
+// 프로세스는 항상 OPTiCS-Hub 루트(WORKDIR)에서 기동되므로 cwd 기준 상대 경로로 읽는다.
+const serviceUnavailableTemplate = fs.readFileSync(
+  path.join(process.cwd(), 'proxy', 'templates', 'ServiceTemporarilyUnavailable.html'),
+  'utf-8',
+);
+
+const requestedServiceNotFoundTemplate = fs.readFileSync(
+  path.join(process.cwd(), 'proxy', 'templates', 'RequestedServiceNotFound.html'),
+  'utf-8',
+);
+
+// Host 헤더 등 외부 입력이 그대로 들어오므로 치환 값은 반드시 이스케이프한다.
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderTemplate(template: string, vars: Record<string, string>) {
+  return template.replace(/{{\s*(\w+)\s*}}/g, (match, key: string) => {
+    return Object.prototype.hasOwnProperty.call(vars, key) ? escapeHtml(vars[key]) : match;
+  });
+}
+
+function renderServiceUnavailablePage(vars: Record<string, string>) {
+  return renderTemplate(serviceUnavailableTemplate, vars);
+}
+
+// Cloudflare가 프록시한 요청에는 cf-ray 헤더가 붙는다. CF를 거치지 않은
+// 직접 접근에는 없으므로 그때는 '-'로 표시한다.
+function readCfRay(header: string[]) {
+  const line = header.find(value => value.toLowerCase().startsWith('cf-ray:'));
+  return line === undefined ? '-' : line.replace(/^cf-ray:\s*/i, '').trim() || '-';
+}
+
+function renderServiceNotFoundPage(requestUrl: string, requestId: string, rayId: string) {
+  return renderTemplate(requestedServiceNotFoundTemplate, {
+    requestUrl: requestUrl || 'unknown host',
+    requestId,
+    rayId,
+    timestamp: new Date().toISOString(),
+  });
+}
 
 const proxyServer = net.createServer((socket) => {
   let buffer = Buffer.alloc(0);
   const token = randomUUID();
-  const requestId = randomUUID();
+  const requestId = `opt_${ulid()}`;
   let startedAt: number | null = null;
   let tunnelConnected = false;
   let ttfbRecorded = false;
@@ -33,24 +83,26 @@ const proxyServer = net.createServer((socket) => {
     const header = buffer.subarray(0, idx).toString().split('\r\n');
     const [requestLine = ''] = header;
     const method = requestLine.split(' ')[0] || 'UNKNOWN';
+    const rayId = readCfRay(header);
     const hostLine = header.find(line => line.toLowerCase().startsWith('host:'));
     if (hostLine === undefined) {
       logDiagnostic('proxy_request_rejected', requestId, {
         outcome: 'missing_host',
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(makeResponse(404, 'Requested Service Not Found'));
+      socket.end(makeHtmlResponse(404, 'Requested Service Not Found', renderServiceNotFoundPage('', requestId, rayId)));
       return;
     }
     const route = parseRouteFromHostHeader(hostLine);
     if (route === null) {
+      const rejectedHost = hostLine.replace(/^host:\s*/i, '').trim();
       logDiagnostic('proxy_request_rejected', requestId, {
         method,
-        host: hostLine.replace(/^host:\s*/i, '').trim(),
+        host: rejectedHost,
         outcome: 'invalid_route',
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(makeResponse(404, 'Requested Service Not Found'));
+      socket.end(makeHtmlResponse(404, 'Requested Service Not Found', renderServiceNotFoundPage(rejectedHost, requestId, rayId)));
       return;
     }
 
@@ -59,18 +111,26 @@ const proxyServer = net.createServer((socket) => {
     buffer = withRequestIdHeader(buffer, idx, requestId);
 
     register(token, socket, buffer, () => {
-      logDiagnostic('proxy_tunnel_timeout', requestId, {
+      logDiagnostic('agent_not_responding', requestId, {
         method,
         host,
-        outcome: 'timeout',
+        outcome: 'service temporarily unavailable',
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(makeResponse(504, 'Gateway Timeout'));
+      const page = renderServiceUnavailablePage({
+        serviceName: serviceSubdomain,
+        requestUrl: host,
+        requestId,
+        rayId,
+        timestamp: new Date().toISOString(),
+      });
+      socket.end(makeHtmlResponse(503, 'Service Temporarily Unavailable', page));
     }, {
       requestId,
       startedAt: requestStartedAt,
       method,
       host,
+      rayId,
       onTunnelSetup: () => {
         tunnelConnected = true;
         logDiagnostic('proxy_tunnel_connected', requestId, {
@@ -175,6 +235,15 @@ export function startProxyServer(port: number) {
 function makeResponse(status: number, reason: string, body: string = '') {
   return `HTTP/1.1 ${status} ${reason}\r\n` +
     `content-type: text/plain\r\n` +
+    `content-length: ${Buffer.byteLength(body)}\r\n` +
+    `connection: close\r\n` +
+    `\r\n` +
+    body;
+}
+
+function makeHtmlResponse(status: number, reason: string, body: string) {
+  return `HTTP/1.1 ${status} ${reason}\r\n` +
+    `content-type: text/html; charset=utf-8\r\n` +
     `content-length: ${Buffer.byteLength(body)}\r\n` +
     `connection: close\r\n` +
     `\r\n` +
