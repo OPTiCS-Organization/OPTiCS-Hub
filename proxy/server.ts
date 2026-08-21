@@ -182,7 +182,15 @@ const proxyServer = net.createServer((socket) => {
           hub_status: response.status,
           elapsed_ms: elapsedSince(requestStartedAt),
         });
-        socket.end(makeResponse(status, reason));
+        socket.end(status === 404
+          ? makeHtmlResponse(404, reason, renderServiceNotFoundPage(host, requestId, rayId))
+          : makeHtmlResponse(504, reason, renderServiceUnavailablePage({
+            serviceName: serviceSubdomain,
+            requestUrl: host,
+            requestId,
+            rayId,
+            timestamp: new Date().toISOString(),
+          })));
         return;
       }
 
@@ -198,7 +206,13 @@ const proxyServer = net.createServer((socket) => {
         elapsed_ms: elapsedSince(requestStartedAt),
       });
     } catch (error) {
-      socket.end(makeResponse(504, 'Gateway Timeout'));
+      socket.end(makeHtmlResponse(504, 'Gateway Timeout', renderServiceUnavailablePage({
+        serviceName: serviceSubdomain,
+        requestUrl: host,
+        requestId,
+        rayId,
+        timestamp: new Date().toISOString(),
+      })));
       logDiagnostic('proxy_hub_request_error', requestId, {
         method,
         host,
@@ -230,15 +244,6 @@ const proxyServer = net.createServer((socket) => {
 
 export function startProxyServer(port: number) {
   proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
-}
-
-function makeResponse(status: number, reason: string, body: string = '') {
-  return `HTTP/1.1 ${status} ${reason}\r\n` +
-    `content-type: text/plain\r\n` +
-    `content-length: ${Buffer.byteLength(body)}\r\n` +
-    `connection: close\r\n` +
-    `\r\n` +
-    body;
 }
 
 function makeHtmlResponse(status: number, reason: string, body: string) {
