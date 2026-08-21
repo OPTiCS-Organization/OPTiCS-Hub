@@ -174,8 +174,8 @@ const proxyServer = net.createServer((socket) => {
       });
 
       if (!response.ok) {
-        const status = response.status === 404 ? 404 : 504;
-        const reason = response.status === 404 ? 'Requested Service Not Found' : 'Gateway Timeout';
+        const status = response.status === 404 ? 404 : 503;
+        const reason = response.status === 404 ? 'Requested Service Not Found' : 'Service Temporarily Unavailable';
         logDiagnostic('proxy_hub_request_failed', requestId, {
           method,
           host,
@@ -184,7 +184,7 @@ const proxyServer = net.createServer((socket) => {
         });
         socket.end(status === 404
           ? makeHtmlResponse(404, reason, renderServiceNotFoundPage(host, requestId, rayId))
-          : makeHtmlResponse(504, reason, renderServiceUnavailablePage({
+          : makeHtmlResponse(503, reason, renderServiceUnavailablePage({
             serviceName: serviceSubdomain,
             requestUrl: host,
             requestId,
@@ -206,7 +206,7 @@ const proxyServer = net.createServer((socket) => {
         elapsed_ms: elapsedSince(requestStartedAt),
       });
     } catch (error) {
-      socket.end(makeHtmlResponse(504, 'Gateway Timeout', renderServiceUnavailablePage({
+      socket.end(makeHtmlResponse(503, 'Service Temporarily Unavailable', renderServiceUnavailablePage({
         serviceName: serviceSubdomain,
         requestUrl: host,
         requestId,
