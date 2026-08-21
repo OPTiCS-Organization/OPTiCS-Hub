@@ -5,6 +5,7 @@ export type RequestDiagnostics = {
   startedAt: number;
   method: string;
   host: string;
+  rayId: string;
   onTunnelSetup: () => void;
   onTtfb: () => void;
 };

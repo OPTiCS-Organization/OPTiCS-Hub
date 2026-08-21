@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>404 Requested Service Not Found</title>
+<style>
+  :root {
+    /* OPTiCS Hub Console tokens (src/index.css @theme) */
+    --accent: #fd7a28;
+    --bg: #151210;
+    --border: #393431;
+    --text: #eae7e4;
+    --text-2: #aaa4a0;
+    --text-3: #75706c;
+    --ok: #6db98f;
+    --error: #e0726a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 48px 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .page { max-width: 640px; margin: 0 auto; }
+
+  .brand {
+    margin: 0 0 20px;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--text-2);
+  }
+
+  .brand b { color: var(--text); font-weight: 700; }
+
+  header {
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  h1 {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  h1 span {
+    font-size: 18px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text-2);
+  }
+
+  /* chain — 503 페이지와 동일 구조. 마지막 노드만 '빈 소켓'으로 그린다. */
+  .chain {
+    display: flex;
+    gap: 12px;
+    margin: 32px 0;
+  }
+
+  .step {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    text-align: center;
+  }
+
+  .node {
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    border: 1.5px solid var(--border);
+    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .node svg { width: 16px; height: 16px; }
+
+  .step.ok .node { border-color: var(--ok); color: var(--ok); }
+
+  /* 노드가 고장난 게 아니라 아예 없다 — 아이콘 없는 점선 원 */
+  .step.empty .node {
+    border-style: dashed;
+    border-color: var(--error);
+  }
+
+  .arrow {
+    flex: 0 0 auto;
+    margin-top: 8px;
+    color: var(--text-3);
+  }
+
+  .arrow svg { width: 16px; height: 16px; display: block; }
+
+  .step .name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    overflow-wrap: break-word;
+  }
+
+  .step .state {
+    font-size: 12px;
+    color: var(--text-3);
+  }
+
+  .step.ok .state { color: var(--ok); }
+
+  .step.empty .name {
+    font-family: var(--mono);
+    font-weight: 400;
+    color: var(--text-3);
+  }
+
+  .step.empty .state { color: var(--error); }
+
+  p { margin: 0; color: var(--text-2); }
+
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  a { color: var(--accent); }
+
+  footer {
+    margin-top: 32px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-3);
+    overflow-wrap: break-word;
+  }
+
+  @media (max-width: 560px) {
+    body { padding: 32px 20px; }
+    .brand { font-size: 18px; }
+    h1 { font-size: 20px; gap: 8px; }
+    h1 span { font-size: 16px; }
+    .chain { flex-direction: column; gap: 8px; }
+    .step { flex-direction: row; text-align: left; gap: 12px; }
+    .step > div:last-child { margin-left: auto; }
+    .arrow { margin: 0 0 0 8px; align-self: flex-start; transform: rotate(90deg); }
+  }
+
+  /* --- easter egg: 503/404 제목 더블클릭 --- */
+  h1 { user-select: none; }
+
+  /* 디스코드 미저장 경고처럼 짧고 빠른 좌우 진동 (0.4s, 감쇠 없음) */
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    7% { transform: translateX(-7px); }
+    14% { transform: translateX(7px); }
+    21% { transform: translateX(-7px); }
+    28% { transform: translateX(7px); }
+    35% { transform: translateX(-7px); }
+    42% { transform: translateX(7px); }
+    49% { transform: translateX(-7px); }
+    56% { transform: translateX(7px); }
+    63% { transform: translateX(-7px); }
+    70% { transform: translateX(7px); }
+    77% { transform: translateX(-7px); }
+    84% { transform: translateX(7px); }
+    91% { transform: translateX(-7px); }
+  }
+
+  .shaking { animation: shake 400ms linear both; }
+
+  /* 진동이 끝나면 뜸 들이지 않고 곧바로 가속 낙하.
+     속도·이탈 폭·회전량은 JS가 블록 높이(무게)에 따라 정한다. */
+  @keyframes collapse {
+    0% {
+      transform: translate(0, 0) rotate(0deg) scale(1);
+    }
+    100% {
+      /*
+       * 뷰포트 높이(100vh) + 요소 자신의 높이(100%) + 회전 여유(340px).
+       * .page 최대 너비가 640px이므로 최대 ±90° 회전 시 바운딩 박스가
+       * 아래로 최대 320px 더 튀어나온다. 340px면 어떤 요소든 완전히 빠져나간다.
+       */
+      transform: translate(var(--dx, 0), calc(100vh + 100% + 340px)) rotate(var(--spin, 0deg)) scale(0.92);
+    }
+  }
+
+  .collapsing > * {
+    animation: collapse var(--dur, 0.7s) cubic-bezier(0.6, 0.02, 0.85, 0.2) both;
+  }
+
+  @keyframes restore-in {
+    from { opacity: 0; transform: translate(-50%, 12px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
+
+  .restore {
+    position: fixed;
+    left: 50%;
+    bottom: 40px;
+    transform: translate(-50%, 0);
+    appearance: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-2);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 18px;
+    transition: color 150ms ease, border-color 150ms ease;
+    animation: restore-in 240ms ease-out both;
+  }
+
+  .restore:hover {
+    color: var(--text);
+    border-color: var(--text-2);
+  }
+
+  .restore[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shaking { animation: none; }
+    .collapsing > * { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <p class="brand"><b>OPTiCS</b> Gateway</p>
+
+    <header>
+      <h1>404 <span>Requested Service Not Found</span></h1>
+    </header>
+
+    <div class="chain">
+      <div class="step ok">
+        <div class="node" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="4" width="19" height="16" rx="2.5" stroke="currentColor" stroke-width="1.6"/><path d="M2.5 9h19M5.8 6.5h.01M8.6 6.5h.01" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </div>
+        <div class="name">Your Browser</div>
+        <div class="state">Working</div>
+      </div>
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="step ok">
+        <div class="node" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6"/><path d="M3.2 9.5h17.6M3.2 14.5h17.6M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="name">Cloudflare Edge</div>
+        <div class="state">Working</div>
+      </div>
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="step ok">
+        <div class="node" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M2.5 12h3c4 0 3-5 7-5h5M5.5 12c4 0 3 5 7 5h5M15 4.5 17.5 7 15 9.5M15 14.5 17.5 17 15 19.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="name">OPTiCS Gateway</div>
+        <div class="state">Working</div>
+      </div>
+      <div class="arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 12h14m0 0-5-5m5 5-5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="step empty">
+        <div class="node" aria-hidden="true"></div>
+        <div class="name">{{requestUrl}}</div>
+        <div class="state">No Service Here</div>
+      </div>
+    </div>
+
+    <p>The OPTiCS Gateway has no service registered at this address. It may be misspelled, or the service may have been removed. If you administer this workspace, review the registered services in the <a href="https://console.optics.run">OPTiCS Console</a>.</p>
+
+    <footer>
+      {{timestamp}} &middot; Request&nbsp;ID: {{requestId}} &middot; Ray&nbsp;ID: {{rayId}}
+    </footer>
+  </div>
+  <button class="restore" type="button" hidden>Rebuild page</button>
+
+<script>
+  // Easter egg: 503/404 제목을 더블클릭하면 페이지가 무너진다.
+  (function () {
+    var page = document.querySelector('.page');
+    var trigger = document.querySelector('h1');
+    var restore = document.querySelector('.restore');
+    if (!page || !trigger || !restore) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    var busy = false;
+    var blocks = [];
+
+    trigger.addEventListener('dblclick', function () {
+      if (busy) return;
+      busy = true;
+
+      page.classList.add('shaking');
+
+      setTimeout(function () {
+        page.classList.remove('shaking');
+
+        blocks = Array.prototype.slice.call(page.children);
+
+        // 블록 높이를 무게로 삼는다. 무거울수록 빠르고 곧게, 가벼울수록
+        // 느리고 멀리 흩날리며 많이 구른다.
+        var heights = blocks.map(function (el) { return el.offsetHeight; });
+        var maxHeight = Math.max.apply(null, heights) || 1;
+
+        blocks.forEach(function (el, i) {
+          var weight = heights[i] / maxHeight;      // 0(가벼움) ~ 1(무거움)
+          var drift = 1 - weight * 0.65;            // 가벼울수록 크게 흩날린다
+          var dir = Math.random() < 0.5 ? -1 : 1;
+
+          // 회전은 이탈 방향과 같은 쪽으로 — 공기에 밀려 도는 것처럼 보인다.
+          el.style.setProperty('--dx', (dir * (25 + Math.random() * 85) * drift).toFixed(0) + 'px');
+          el.style.setProperty('--spin', (dir * (20 + Math.random() * 60) * drift).toFixed(0) + 'deg');
+          el.style.setProperty('--dur', (0.5 + (1 - weight) * 0.35 + Math.random() * 0.1).toFixed(2) + 's');
+
+          // 가벼운 블록이 살짝 늦게 딸려 나간다.
+          el.style.animationDelay = ((1 - weight) * 0.12 + Math.random() * 0.05).toFixed(2) + 's';
+        });
+        page.classList.add('collapsing');
+        document.body.style.overflow = 'hidden';
+
+        // 가장 가벼운 블록(지연 최대 0.17s, 지속 최대 0.95s)까지 떨어진 뒤 복구 버튼을 꺼낸다.
+        setTimeout(function () { restore.hidden = false; }, 1200);
+      }, 400);
+    });
+
+    restore.addEventListener('click', function () {
+      restore.hidden = true;
+      page.classList.remove('collapsing');
+      document.body.style.overflow = '';
+      blocks.forEach(function (el) {
+        el.style.removeProperty('--dx');
+        el.style.removeProperty('--spin');
+        el.style.removeProperty('--dur');
+        el.style.animationDelay = '';
+      });
+      busy = false;
+    });
+  })();
+</script>
+</body>
+</html>
