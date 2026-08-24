@@ -263,8 +263,9 @@ const proxyServer = net.createServer((socket) => {
   socket.on('data', onData);
 });
 
+// 서버 인스턴스를 돌려준다. 테스트가 끝난 뒤 닫을 수 있어야 하기 때문이다.
 export function startProxyServer(port: number) {
-  proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
+  return proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
 }
 
 /**
