@@ -5,9 +5,10 @@ import { AgentGateway } from './agent.gateway';
 import { ConsoleGateway } from './console.gateway';
 import { AgentUpdateService } from './agent-update.service';
 import { AuthModule } from 'src/auth/auth.module';
+import { ReleasesModule } from 'src/releases/releases.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ReleasesModule],
   controllers: [AgentController],
   providers: [AgentService, AgentGateway, ConsoleGateway, AgentUpdateService],
   exports: [AgentGateway, ConsoleGateway, AgentUpdateService],

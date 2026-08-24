@@ -4,12 +4,14 @@ import { PrismaService } from 'src/prisma.service';
 import { generate } from 'random-words';
 import log from 'spectra-log';
 import { ConsoleGateway } from './console.gateway';
+import { ReleaseCatalogService } from 'src/releases/release-catalog.service';
 
 @Injectable()
 export class AgentService implements OnModuleInit {
   constructor(
     private readonly prismaService: PrismaService,
     private readonly consoleGateway: ConsoleGateway,
+    private readonly releaseCatalogService: ReleaseCatalogService,
   ) { };
 
   async onModuleInit() {
@@ -148,6 +150,15 @@ export class AgentService implements OnModuleInit {
       },
     });
 
+    // 카탈로그는 Agent마다 다시 읽을 필요가 없다. 한 번 조회해 전부에 적용한다.
+    const upgrades = new Map<string, { version: string; notes: string | null } | null>();
+    for (const version of new Set(rawAgents.map((a) => a.agent_version))) {
+      const upgrade = await this.releaseCatalogService
+        .findUpgradeFor(version)
+        .catch(() => null);
+      upgrades.set(version ?? '', upgrade ? { version: upgrade.version, notes: upgrade.notes } : null);
+    }
+
     return rawAgents.map((a) => ({
       agentIndex: a.agent_index,
       agentIp: a.agent_connection === 'linked' ? a.agent_ip : null,
@@ -164,6 +175,7 @@ export class AgentService implements OnModuleInit {
       updateTarget: a.agent_update_target,
       updateMessage: a.agent_update_message,
       updateStartedAt: a.agent_update_started_at,
+      upgrade: upgrades.get(a.agent_version ?? '') ?? null,
     }));
   }
 

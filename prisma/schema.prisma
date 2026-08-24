@@ -173,6 +173,27 @@ enum AgentStatus {
   failed
 }
 
+/// GitHub Releases의 캐시.
+///
+/// 진실의 출처는 GitHub이고 이 테이블은 사본이다. 그렇게 정해두면 오래된 데이터가 버그가 아니라
+/// 재동기화하면 되는 상태가 되고, 카탈로그를 손으로 편집하는 관리 화면이 영원히 필요 없어진다.
+/// 릴리즈에 release.json 자산이 붙은 버전만 들어온다. 그 자산은 이미지 푸시가 성공한 뒤에만
+/// 발행되므로, 여기 있다는 것은 GHCR에 이미지가 실제로 존재한다는 뜻이다.
+model agent_releases {
+  release_version      String    @id
+  release_channel      String    @default("stable")
+  release_protocol     Int
+  release_image        String
+  release_notes        String?   @db.Text
+  release_published_at DateTime
+  release_synced_at    DateTime  @updatedAt
+  /// GitHub에서 릴리즈가 사라지면 채운다. 행은 지우지 않는다.
+  /// 이미 그 버전을 설치한 Agent의 agent_version이 미아가 되기 때문이다.
+  release_yanked_at    DateTime?
+
+  @@index([release_published_at])
+}
+
 /// Agent 자기 교체의 진행 단계.
 /// 교체 도중 Agent 프로세스는 죽고 업데이터 컨테이너는 Hub와 통신할 수단이 없으므로,
 /// 전 구간 살아 있는 Hub가 이 상태를 소유한다.

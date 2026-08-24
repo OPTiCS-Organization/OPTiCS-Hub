@@ -4,6 +4,7 @@ import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { AgentGateway } from './agent.gateway';
 import { ConsoleGateway } from './console.gateway';
+import { ReleaseCatalogService } from 'src/releases/release-catalog.service';
 
 /** Hub가 보내는 값이 Agent에서 그대로 이미지 태그가 되므로 여기서도 좁게 막는다. */
 const TAG_PATTERN = /^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
@@ -34,6 +35,7 @@ export class AgentUpdateService implements OnModuleInit {
     private readonly agentGateway: AgentGateway,
     @Inject(forwardRef(() => ConsoleGateway))
     private readonly consoleGateway: ConsoleGateway,
+    private readonly releaseCatalogService: ReleaseCatalogService,
   ) { }
 
   async onModuleInit() {
@@ -67,6 +69,10 @@ export class AgentUpdateService implements OnModuleInit {
     if (IN_FLIGHT.includes(agent.agent_update_phase)) {
       throw new ConflictException('Another update is already in progress.');
     }
+
+    // 카탈로그에 있고, 회수되지 않았고, 프로토콜이 Hub 지원 범위 안인지 확인한다.
+    // 여기를 통과했다는 것은 GHCR에 이미지가 실제로 존재한다는 뜻이기도 하다.
+    await this.releaseCatalogService.assertInstallable(targetVersion);
 
     const sent = this.agentGateway.sendToAgent(agentUuid, 'update-agent', { version: targetVersion });
     if (!sent) throw new ConflictException('Agent is not connected.');
