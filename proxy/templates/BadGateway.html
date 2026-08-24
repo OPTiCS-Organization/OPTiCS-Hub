@@ -3,10 +3,9 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>503 Service Temporarily Unavailable</title>
+<title>502 Bad Gateway</title>
 <style>
   :root {
-    /* OPTiCS Hub Console tokens (src/index.css @theme) */
     --accent: #fd7a28;
     --bg: #151210;
     --surface: #1a1715;
@@ -164,7 +163,7 @@
     .arrow { margin: 0 0 0 8px; align-self: flex-start; transform: rotate(90deg); }
   }
 
-  /* --- easter egg: 503/404 제목 더블클릭 --- */
+  /* --- easter egg: 502/404 제목 더블클릭 --- */
   h1 { user-select: none; }
 
   /* 디스코드 미저장 경고처럼 짧고 빠른 좌우 진동 (0.4s, 감쇠 없음) */
@@ -187,18 +186,11 @@
 
   .shaking { animation: shake 400ms linear both; }
 
-  /* 진동이 끝나면 뜸 들이지 않고 곧바로 가속 낙하.
-     속도·이탈 폭·회전량은 JS가 블록 높이(무게)에 따라 정한다. */
   @keyframes collapse {
     0% {
       transform: translate(0, 0) rotate(0deg) scale(1);
     }
     100% {
-      /*
-       * 뷰포트 높이(100vh) + 요소 자신의 높이(100%) + 회전 여유(340px).
-       * .page 최대 너비가 640px이므로 최대 ±90° 회전 시 바운딩 박스가
-       * 아래로 최대 320px 더 튀어나온다. 340px면 어떤 요소든 완전히 빠져나간다.
-       */
       transform: translate(var(--dx, 0), calc(100vh + 100% + 340px)) rotate(var(--spin, 0deg)) scale(0.92);
     }
   }
@@ -249,7 +241,7 @@
     <p class="brand"><b>OPTiCS</b> Gateway</p>
 
     <header>
-      <h1>503 <span>Service Temporarily Unavailable</span></h1>
+      <h1>502 <span>Bad Gateway</span></h1>
     </header>
 
     <div class="chain">
@@ -294,22 +286,22 @@
 
     <section>
       <h2>What happened?</h2>
-      <p>Your request reached the OPTiCS Gateway, but the service registered at <code>{{requestUrl}}</code> did not respond within 10 seconds. The host server's network may be unstable, or the service may still be starting up.</p>
+      <p>{{detail}}</p>
     </section>
 
     <section>
       <h2>What can I do?</h2>
-      <p>Try your request again in a moment. If you administer this service, you can diagnose the issue in the <a href="https://console.optics.run">OPTiCS Console</a>. If the problem persists, contact the service's administrator.</p>
+      <p>Wait a moment and try again &mdash; a service that is restarting usually recovers on its own. If you administer this service, check its status and agent connection in the <a href="https://console.optics.run">OPTiCS Console</a>. Otherwise, contact the service's administrator.</p>
     </section>
 
     <footer>
-      {{timestamp}} &middot; Request&nbsp;ID: {{requestId}} &middot; Ray&nbsp;ID: {{rayId}}
+      {{timestamp}} &middot; {{outcome}}<br />
+      Request&nbsp;ID: {{requestId}} &middot; Ray&nbsp;ID: {{rayId}}
     </footer>
   </div>
   <button class="restore" type="button" hidden>Rebuild page</button>
 
 <script>
-  // Easter egg: 503/404 제목을 더블클릭하면 페이지가 무너진다.
   (function () {
     var page = document.querySelector('.page');
     var trigger = document.querySelector('h1');
@@ -331,8 +323,6 @@
 
         blocks = Array.prototype.slice.call(page.children);
 
-        // 블록 높이를 무게로 삼는다. 무거울수록 빠르고 곧게, 가벼울수록
-        // 느리고 멀리 흩날리며 많이 구른다.
         var heights = blocks.map(function (el) { return el.offsetHeight; });
         var maxHeight = Math.max.apply(null, heights) || 1;
 
@@ -341,18 +331,15 @@
           var drift = 1 - weight * 0.65;            // 가벼울수록 크게 흩날린다
           var dir = Math.random() < 0.5 ? -1 : 1;
 
-          // 회전은 이탈 방향과 같은 쪽으로 — 공기에 밀려 도는 것처럼 보인다.
           el.style.setProperty('--dx', (dir * (25 + Math.random() * 85) * drift).toFixed(0) + 'px');
           el.style.setProperty('--spin', (dir * (20 + Math.random() * 60) * drift).toFixed(0) + 'deg');
           el.style.setProperty('--dur', (0.5 + (1 - weight) * 0.35 + Math.random() * 0.1).toFixed(2) + 's');
 
-          // 가벼운 블록이 살짝 늦게 딸려 나간다.
           el.style.animationDelay = ((1 - weight) * 0.12 + Math.random() * 0.05).toFixed(2) + 's';
         });
         page.classList.add('collapsing');
         document.body.style.overflow = 'hidden';
 
-        // 가장 가벼운 블록(지연 최대 0.17s, 지속 최대 0.95s)까지 떨어진 뒤 복구 버튼을 꺼낸다.
         setTimeout(function () { restore.hidden = false; }, 1200);
       }, 400);
     });

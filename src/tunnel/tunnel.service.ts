@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { AgentGateway } from 'src/agent/agent.gateway';
 import { PrismaService } from 'src/prisma.service';
+import { TUNNEL_OUTCOME, type TunnelOutcome } from './tunnel-outcome';
 
 @Injectable()
 export class TunnelService {
@@ -18,7 +19,7 @@ export class TunnelService {
     let workspaceQueryMs = 0;
     let endpointQueryMs = 0;
     let queryCount = 0;
-    let outcome = 'db_error';
+    let outcome: TunnelOutcome = TUNNEL_OUTCOME.DB_ERROR;
 
     try {
       queryCount += 1;
@@ -36,8 +37,8 @@ export class TunnelService {
       );
 
       if (!workspace) {
-        outcome = 'workspace_not_found';
-        throw new NotFoundException('Workspace not found');
+        outcome = TUNNEL_OUTCOME.WORKSPACE_NOT_FOUND;
+        throw new NotFoundException({ outcome, message: 'Workspace not found' });
       }
 
       queryCount += 1;
@@ -71,13 +72,13 @@ export class TunnelService {
       );
 
       if (!endpoint) {
-        outcome = 'service_not_found';
-        throw new NotFoundException('Service not found');
+        outcome = TUNNEL_OUTCOME.SERVICE_NOT_FOUND;
+        throw new NotFoundException({ outcome, message: 'Service not found' });
       }
 
       if (!endpoint.service.agent || endpoint.service.agent.agent_connection !== 'linked' || endpoint.service.agent.agent_deleted_at) {
-        outcome = 'agent_not_found';
-        throw new NotFoundException('Agent not found');
+        outcome = TUNNEL_OUTCOME.AGENT_NOT_FOUND;
+        throw new NotFoundException({ outcome, message: 'Agent not found' });
       }
 
       const response = this.agentGateway.sendToAgent(endpoint.service.agent.agent_uuid, 'tunnel-connect', {
@@ -87,12 +88,13 @@ export class TunnelService {
       });
 
       if (!response) {
-        outcome = 'agent_offline';
-        throw new ServiceUnavailableException('Agent is probably offline');
+        outcome = TUNNEL_OUTCOME.AGENT_OFFLINE;
+        throw new ServiceUnavailableException({ outcome, message: 'Agent is probably offline' });
       }
 
-      outcome = 'success';
+      outcome = TUNNEL_OUTCOME.SUCCESS;
       return {
+        outcome,
         request_id: requestId,
         hub_db_query_ms: roundMilliseconds(workspaceQueryMs + endpointQueryMs),
         workspace_query_ms: roundMilliseconds(workspaceQueryMs),
