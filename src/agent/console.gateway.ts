@@ -195,7 +195,7 @@ export class ConsoleGateway implements OnGatewayConnection, OnGatewayDisconnect 
   }
 
   /** 지정한 워크스페이스 룸에 Console 이벤트를 전송한다. */
-  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'service-status' | 'service-log' | 'service-log-history' | 'service-log-markers' | 'log-load-progress' | 'container-status' | 'response', payload?: object) {
+  emitToWorkspace(workspaceIndex: number, event: 'agent-updated' | 'agent-update' | 'service-status' | 'service-log' | 'service-log-history' | 'service-log-markers' | 'log-load-progress' | 'container-status' | 'response', payload?: object) {
     this.server.to(this.workspaceRoom(workspaceIndex)).emit(event, payload);
   }
 

@@ -28,12 +28,12 @@ model users {
 }
 
 model verification {
-  verification_index       Int       @id @default(autoincrement())
-  verification_email       String
-  verification_code        String
-  verification_created_at  DateTime  @default(now())
-  verification_last_sent_at DateTime @default(now())
-  verification_consumed_at DateTime?
+  verification_index        Int       @id @default(autoincrement())
+  verification_email        String
+  verification_code         String
+  verification_created_at   DateTime  @default(now())
+  verification_last_sent_at DateTime  @default(now())
+  verification_consumed_at  DateTime?
 
   @@index([verification_email, verification_created_at])
 }
@@ -69,19 +69,23 @@ model workspaces {
  * 새 OPTiCS 에이전트를 생성했을 때 연결 코드
  */
 model agents {
-  agent_index            Int              @id @default(autoincrement())
-  agent_ip               String
-  agent_code             String           @unique
-  agent_uuid             String           @unique @default(uuid())
-  agent_name             String
-  agent_parent_workspace Int?
-  agent_connection       ConnectionStatus @default(unlinked)
-  agent_status           AgentStatus      @default(waiting)
-  agent_version          String?
-  agent_created_at       DateTime         @default(now())
-  agent_deleted_at       DateTime?
-  agent_last_online      DateTime         @default(now())
-  services               services[]
+  agent_index             Int              @id @default(autoincrement())
+  agent_ip                String
+  agent_code              String           @unique
+  agent_uuid              String           @unique @default(uuid())
+  agent_name              String
+  agent_parent_workspace  Int?
+  agent_connection        ConnectionStatus @default(unlinked)
+  agent_status            AgentStatus      @default(waiting)
+  agent_version           String?
+  agent_update_phase      AgentUpdatePhase @default(idle)
+  agent_update_target     String?
+  agent_update_message    String?          @db.Text
+  agent_update_started_at DateTime?
+  agent_created_at        DateTime         @default(now())
+  agent_deleted_at        DateTime?
+  agent_last_online       DateTime         @default(now())
+  services                services[]
 
   parent workspaces? @relation(fields: [agent_parent_workspace], references: [workspace_index])
 }
@@ -166,6 +170,19 @@ enum AgentStatus {
   online
   offline
   restarting
+  failed
+}
+
+/// Agent 자기 교체의 진행 단계.
+/// 교체 도중 Agent 프로세스는 죽고 업데이터 컨테이너는 Hub와 통신할 수단이 없으므로,
+/// 전 구간 살아 있는 Hub가 이 상태를 소유한다.
+enum AgentUpdatePhase {
+  idle
+  requested
+  pulling
+  restarting
+  succeeded
+  rolled_back
   failed
 }
 

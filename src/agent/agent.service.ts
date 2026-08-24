@@ -160,6 +160,10 @@ export class AgentService implements OnModuleInit {
       workspaceName: a.parent?.workspace_name ?? null,
       agentUuid: a.agent_uuid,
       agentVersion: a.agent_version,
+      updatePhase: a.agent_update_phase,
+      updateTarget: a.agent_update_target,
+      updateMessage: a.agent_update_message,
+      updateStartedAt: a.agent_update_started_at,
     }));
   }
 

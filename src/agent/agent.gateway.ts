@@ -3,6 +3,7 @@ import { Server, Socket } from 'socket.io';
 import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { AgentService } from './agent.service';
 import { ConsoleGateway } from './console.gateway';
+import { AgentUpdateService } from './agent-update.service';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
@@ -31,6 +32,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly prismaService: PrismaService,
     @Inject(forwardRef(() => ConsoleGateway))
     private readonly consoleGateway: ConsoleGateway,
+    @Inject(forwardRef(() => AgentUpdateService))
+    private readonly agentUpdateService: AgentUpdateService,
   ) { }
 
   private async getWorkspaceIndexForAgentService(agentUuid: string, serviceIndex: number): Promise<number | null> {
@@ -295,6 +298,16 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     log('[Agent Gateway] Connection Established', 200, 'INFO')
   }
 
+  @SubscribeMessage('update-log')
+  async handleUpdateLog(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { line: string },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid || typeof payload?.line !== 'string') return;
+    await this.agentUpdateService.recordProgress(agentUuid, payload.line);
+  }
+
   @SubscribeMessage('register')
   async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion?: string | null }) {
     log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
@@ -310,10 +323,12 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.data.agentUuid = agent.agentUuid;
     client.data.workspaceIndex = agent.agentParentWorkspace;
     client.emit('register', agent);
+    // 업데이트 직후의 재접속이라면 보고된 버전으로 성공/롤백을 판정한다.
+    await this.agentUpdateService.handleReconnect(agent.agentUuid, payload.agentVersion ?? null);
     this.consoleGateway.notifyWorkspaceUpdated(agent.agentParentWorkspace);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
     const agentUuid = (client.data.agentUuid as string | undefined) ?? (client.handshake.auth as { agentUuid?: string }).agentUuid;
     log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
@@ -321,6 +336,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
       this.consoleGateway.closeAgentConnections(agentUuid);
       this.agentUuidToSocketId.delete(agentUuid);
+      // 업데이트로 인한 재시작은 오프라인이 아니다. 매번 오프라인으로 깜빡이면 사고처럼 보인다.
+      if (await this.agentUpdateService.isExpectedRestart(agentUuid)) return;
       this.scheduleOffline(agentUuid);
     }
   }
