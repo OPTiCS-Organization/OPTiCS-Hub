@@ -59,6 +59,31 @@ export class JwtUtil {
     return this.signLoginTokens(userIndex);
   }
 
+  /**
+   * 로그아웃. 제시된 Refresh Token 을 폐기한다.
+   *
+   * Access Token 은 만료될 때까지 유효하지만 짧게 살고, 갱신은 Refresh Token 없이는
+   * 불가능하므로 이 한 줄이 세션의 실질적인 끝이다. 이미 없거나 만료된 토큰이어도
+   * 조용히 넘어간다 — 로그아웃은 몇 번을 눌러도 같은 결과여야 한다.
+   */
+  async revokeRefreshToken(token: string | undefined) {
+    if (!token) return;
+
+    const userIndex: number | undefined = this.jwtService.decode(token)?.userIndex;
+    if (userIndex === undefined) return;
+
+    await this.prismaService.refresh_token.updateMany({
+      where: {
+        token_owner: userIndex,
+        token: token,
+        token_expired_at: null,
+      },
+      data: {
+        token_expired_at: new Date(),
+      },
+    });
+  }
+
   /** 사용자 인증에 사용할 Access Token과 Refresh Token을 함께 발급한다. */
   public async signLoginTokens(userIndex: number) {
     const accessToken = await this.jwtService.signAsync({

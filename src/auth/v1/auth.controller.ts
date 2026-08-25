@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Delete, Get, Patch, Post, Request, UseGuards, UseInterceptors } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Patch, Post, Req, Request, Res, UseGuards, UseInterceptors } from '@nestjs/common';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
+import { cookieOptions } from 'src/global/cookie-options';
 import { TwoFactorAuthenticationService } from '../2fa.service';
 import { AuthService } from '../auth.service';
 import { RegisterDTO } from '../dto/register.dto';
@@ -13,12 +15,14 @@ import { Code } from 'src/global/Code.enum';
 import { JwtGuard } from '../interceptor/guard/jwt.guard';
 import { TwoFactorGuard } from '../interceptor/guard/2fa.guard';
 import { MintPurposeTokenDTO } from '../dto/mintPurposeToken.dto';
+import { JwtUtil } from '../util/jwt.util';
 
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly twoFactorAuthenticationService: TwoFactorAuthenticationService,
+    private readonly jwtUtil: JwtUtil,
   ) { }
 
   @Post('check-email')
@@ -112,6 +116,28 @@ export class AuthController {
 
     const tokens = await this.authService.login(body);
     return { ...tokens, ...response }
+  }
+
+  /**
+   * 로그아웃. Refresh Token 을 폐기하고 인증 쿠키를 지운다.
+   */
+  @Post('logout')
+  async logout(
+    @Req() request: ExpressRequest,
+    @Res({ passthrough: true }) response: ExpressResponse,
+  ) {
+    await this.jwtUtil.revokeRefreshToken(request.cookies?.refreshToken as string | undefined);
+
+    response.clearCookie('accessToken', cookieOptions());
+    response.clearCookie('refreshToken', cookieOptions());
+
+    const result: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: {},
+      message: 'Logged Out Successfully.',
+    };
+
+    return result;
   }
 
   @Post('2fa/setup')
