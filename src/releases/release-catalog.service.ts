@@ -56,7 +56,7 @@ export class ReleaseCatalogService {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
     };
-    // 퍼블릭 저장소라도 토큰을 붙인다. 없으면 시간당 60회로 묶여 동기화가 조용히 실패한다.
+    // 퍼블릭 저장소라도 토큰을 붙인다. 없으면 시간당 60회로 묶여 동기화가 실패한다.
     const token = this.configService.get<string>('GITHUB_TOKEN');
     if (token) headers.Authorization = `Bearer ${token}`;
     return headers;

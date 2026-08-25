@@ -5,8 +5,9 @@ import { PrismaService } from 'src/prisma.service';
 import { AgentGateway } from './agent.gateway';
 import { ConsoleGateway } from './console.gateway';
 import { ReleaseCatalogService } from 'src/releases/release-catalog.service';
+import { MIN_REMOTE_UPDATE_VERSION, supportsRemoteUpdate } from 'src/global/agent-capability';
 
-/** Hub가 보내는 값이 Agent에서 그대로 이미지 태그가 되므로 여기서도 좁게 막는다. */
+/** Hub가 보내는 값이 Agent에서 그대로 이미지 태그가 되므로 여기서도 막는다. */
 const TAG_PATTERN = /^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
 
 /**
@@ -48,26 +49,34 @@ export class AgentUpdateService implements OnModuleInit {
       where: { agent_update_phase: { in: IN_FLIGHT } },
       data: {
         agent_update_phase: 'failed',
-        agent_update_message: 'Hub가 재시작되어 업데이트 결과를 확인하지 못했다.',
+        agent_update_message: 'Hub가 재시작되어 업데이트 결과를 확인하지 못했습니다.',
       },
     });
   }
 
   async requestUpdate(agentUuid: string, targetVersion: string) {
     if (!TAG_PATTERN.test(targetVersion)) {
-      throw new BadRequestException('Malformed target version.');
+      throw new BadRequestException('올바르지 않은 버전 형식입니다.');
     }
 
     const agent = await this.prismaService.agents.findFirst({
       where: { agent_uuid: agentUuid, agent_deleted_at: null },
       select: { agent_status: true, agent_update_phase: true, agent_version: true },
     });
-    if (!agent) throw new NotFoundException('Agent not found.');
+    if (!agent) throw new NotFoundException('에이전트를 찾을 수 없습니다.');
     if (agent.agent_status !== 'online') {
-      throw new ConflictException('Agent is offline.');
+      throw new ConflictException('에이전트가 오프라인 상태입니다.');
+    }
+    // 구버전 Agent에는 update-agent 리스너가 없어 명령이 사라진다.
+    // 보내고 기다리면 멀쩡한 Agent가 타임아웃으로 실패 처리되므로 여기서 끊는다.
+    if (!supportsRemoteUpdate(agent.agent_version)) {
+      throw new ConflictException(
+        `이 OPTiCS Agent ${agent.agent_version ?? 'Unknown Version'}은 원격 업데이트를 지원하지 않습니다. `
+        + `Agent 호스트에서 설치 스크립트를 다시 실행해 ${MIN_REMOTE_UPDATE_VERSION} 이상 버전으로 업그레이드 하세요.`,
+      );
     }
     if (IN_FLIGHT.includes(agent.agent_update_phase)) {
-      throw new ConflictException('Another update is already in progress.');
+      throw new ConflictException('이미 업데이트가 진행 중입니다.');
     }
 
     // 카탈로그에 있고, 회수되지 않았고, 프로토콜이 Hub 지원 범위 안인지 확인한다.
@@ -75,11 +84,13 @@ export class AgentUpdateService implements OnModuleInit {
     await this.releaseCatalogService.assertInstallable(targetVersion);
 
     const sent = this.agentGateway.sendToAgent(agentUuid, 'update-agent', { version: targetVersion });
-    if (!sent) throw new ConflictException('Agent is not connected.');
+    if (!sent) throw new ConflictException('Agent와 연결되어 있지 않습니다.');
 
     await this.transition(agentUuid, 'requested', {
       target: targetVersion,
-      message: `${agent.agent_version ?? '알 수 없는 버전'} → ${targetVersion} 업데이트를 요청했다.`,
+      message: agent.agent_version
+        ? `OPTiCS Agent ${agent.agent_version}에서 ${targetVersion}(으)로 업데이트를 요청했습니다.`
+        : `OPTiCS Agent ${targetVersion}(으)로 업데이트를 요청했습니다.`,
       startedAt: new Date(),
     });
     this.armTimeout(agentUuid);
@@ -102,6 +113,24 @@ export class AgentUpdateService implements OnModuleInit {
   }
 
   /**
+   * 업데이터가 교체를 못 하고 끝났다. Agent는 멀쩡히 살아 있으므로 소켓 이벤트로는 알 수 없고,
+   * 이 보고가 없으면 타임아웃까지 '내려받는 중'에 머문다.
+   */
+  async recordFailure(agentUuid: string, message: string) {
+    const agent = await this.prismaService.agents.findFirst({
+      where: { agent_uuid: agentUuid },
+      select: { agent_update_phase: true, agent_update_target: true },
+    });
+    if (!agent || !IN_FLIGHT.includes(agent.agent_update_phase)) return;
+
+    this.clearTimeout(agentUuid);
+    await this.transition(agentUuid, 'failed', {
+      message: `OPTiCS Agent ${agent.agent_update_target ?? '?'} 업데이트가 실패했습니다. ${message}`,
+    });
+    // 교체가 시작되지 않았으므로 Agent는 이전 버전 그대로 정상 동작한다. 상태를 건드리지 않는다.
+  }
+
+  /**
    * 소켓이 끊겼을 때, 그것이 예정된 재시작인지 알려준다.
    * true면 호출부는 오프라인 처리를 건너뛰어야 한다. 업데이트마다 Agent가 오프라인으로
    * 깜빡이면 사용자에게는 정상 동작이 아니라 사고로 보인다.
@@ -120,7 +149,7 @@ export class AgentUpdateService implements OnModuleInit {
       data: { agent_status: 'restarting' },
     });
     await this.transition(agentUuid, 'restarting', {
-      message: `v${agent.agent_update_target ?? '?'}(으)로 교체 중이다. 곧 다시 연결된다.`,
+      message: `OPTiCS Agent ${agent.agent_update_target ?? 'Unknown Version'}을 다시 시작하고 있습니다.`,
     });
     return true;
   }
@@ -141,11 +170,11 @@ export class AgentUpdateService implements OnModuleInit {
     const target = agent.agent_update_target;
 
     if (reportedVersion && target && reportedVersion === target) {
-      await this.transition(agentUuid, 'succeeded', { message: `v${target} 업데이트를 완료했다.` });
+      await this.transition(agentUuid, 'succeeded', { message: `OPTiCS Agent ${target}(으)로 업데이트를 완료했습니다.` });
       return;
     }
     await this.transition(agentUuid, 'rolled_back', {
-      message: `v${target ?? '?'} 기동에 실패해 v${reportedVersion ?? '?'}(으)로 되돌아왔다.`,
+      message: `OPTiCS Agent ${target ?? 'Unknown Version'} 시작에 실패해 OPTiCS Agent ${reportedVersion ?? 'Unknown Version'}(으)로 되돌렸습니다.`,
     });
   }
 
@@ -179,13 +208,16 @@ export class AgentUpdateService implements OnModuleInit {
     if (!agent || !IN_FLIGHT.includes(agent.agent_update_phase)) return;
 
     await this.transition(agentUuid, 'failed', {
-      message: `v${agent.agent_update_target ?? '?'} 업데이트가 시간 안에 끝나지 않았다. Agent 호스트에서 'docker logs optics-agent-updater'로 원인을 확인해야 한다.`,
+      message: `${agent.agent_update_target ?? 'Unknown Version'} 업데이트가 제한 시간 안에 끝나지 않았습니다. 에이전트 호스트에서 'docker logs optics-agent-updater'로 원인을 확인하세요.`,
     });
-    // 예정된 재시작으로 보고 오프라인 처리를 미뤄뒀으므로, 여기서 실제 상태를 되돌려준다.
-    await this.prismaService.agents.updateMany({
-      where: { agent_uuid: agentUuid },
-      data: { agent_status: 'offline' },
-    });
+    // 예정된 재시작으로 보고 오프라인 처리를 미뤄뒀으므로, 돌아오지 않았을 때만 되돌려준다.
+    // 소켓이 붙어 있는데도 오프라인으로 내리면 멀쩡한 Agent가 죽은 것처럼 보인다.
+    if (!this.agentGateway.isAgentConnected(agentUuid)) {
+      await this.prismaService.agents.updateMany({
+        where: { agent_uuid: agentUuid },
+        data: { agent_status: 'offline' },
+      });
+    }
     log(`[Agent Update] Update timed out: ${agentUuid}`, 500, 'ERROR');
   }
 

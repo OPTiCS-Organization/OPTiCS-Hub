@@ -1,4 +1,5 @@
 import { compareSemver } from './semver.util';
+import { supportsRemoteUpdate } from './agent-capability';
 
 describe('compareSemver', () => {
   const gt = (a: string, b: string) => expect(compareSemver(a, b)).toBeGreaterThan(0);
@@ -30,5 +31,15 @@ describe('compareSemver', () => {
   it('구버전 라인 핫픽스가 상위 버전을 앞지르지 않는다', () => {
     // 발행일 기준이었다면 나중에 나온 0.5.4가 최신이 되어 다운그레이드를 권했다.
     gt('0.6.0', '0.5.4');
+  });
+});
+
+describe('supportsRemoteUpdate', () => {
+  it('0.6.0 미만과 버전 미보고 Agent는 원격 업데이트 대상이 아니다', () => {
+    expect(supportsRemoteUpdate(null)).toBe(false);
+    expect(supportsRemoteUpdate('0.5.3')).toBe(false);
+    expect(supportsRemoteUpdate('0.6.0-rc.1')).toBe(false);   // 프리릴리즈는 0.6.0보다 낮다
+    expect(supportsRemoteUpdate('0.6.0')).toBe(true);
+    expect(supportsRemoteUpdate('1.0.0')).toBe(true);
   });
 });

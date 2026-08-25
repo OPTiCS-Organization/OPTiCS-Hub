@@ -308,6 +308,16 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     await this.agentUpdateService.recordProgress(agentUuid, payload.line);
   }
 
+  @SubscribeMessage('update-failed')
+  async handleUpdateFailed(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: { message: string },
+  ) {
+    const agentUuid = client.data.agentUuid as string | undefined;
+    if (!agentUuid) return;
+    await this.agentUpdateService.recordFailure(agentUuid, String(payload?.message ?? '').slice(0, 500));
+  }
+
   @SubscribeMessage('register')
   async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion?: string | null }) {
     log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
@@ -361,6 +371,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return true;
   }
 
+  /** 소켓이 실제로 붙어 있는지. 업데이트 타임아웃 처리에서 오프라인 여부를 판단하는 데 쓴다. */
   isAgentConnected(agentUuid: string): boolean {
     return this.agentUuidToSocketId.has(agentUuid);
   }

@@ -5,6 +5,7 @@ import { generate } from 'random-words';
 import log from 'spectra-log';
 import { ConsoleGateway } from './console.gateway';
 import { ReleaseCatalogService } from 'src/releases/release-catalog.service';
+import { supportsRemoteUpdate } from 'src/global/agent-capability';
 
 @Injectable()
 export class AgentService implements OnModuleInit {
@@ -176,6 +177,7 @@ export class AgentService implements OnModuleInit {
       updateMessage: a.agent_update_message,
       updateStartedAt: a.agent_update_started_at,
       upgrade: upgrades.get(a.agent_version ?? '') ?? null,
+      remoteUpdateSupported: supportsRemoteUpdate(a.agent_version),
     }));
   }
 
