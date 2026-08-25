@@ -117,7 +117,7 @@ enum DEPLOY_OPTION { DOCKERFILE, COMPOSE, PRESET_NEST }
 - 그 외 → 해당 워크스페이스로 브로드캐스트, 페이로드는 `{ agentCode, ...payload }`
 
 `serviceIndex`를 가진 이벤트는 Hub가 **"그 서비스가 정말 이 Agent 소유인가"를 매번 검증**하고,
-아니면 조용히 버린다. 즉 Agent는 자신에게 배정되지 않은 `serviceIndex`로 아무것도 할 수 없다.
+아니면 버린다. 즉 Agent는 자신에게 배정되지 않은 `serviceIndex`로 아무것도 할 수 없다.
 
 ---
 
@@ -186,7 +186,7 @@ Agent는 `command` 처리 후 항상 `response`를 1회 emit한다.
    → 프로토콜 협상 도입 시 가장 먼저 생겨야 할 상태.
 
 2. **`register` ack의 타입이 양쪽에서 다르다.** Hub는 `agentParentWorkspace`를 포함해 4개 필드를 보내지만,
-   Agent의 수신 타입은 3개만 선언하고 있어 이 필드는 조용히 버려진다.
+   Agent의 수신 타입은 3개만 선언하고 있어 이 필드는 버려진다.
 
 3. **`response`가 사실상 타입이 없다.** Hub는 `unknown`으로 받아 Console에 그대로 넘긴다.
    어떤 명령의 응답인지 식별할 상관 ID도 없다.

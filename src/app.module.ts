@@ -11,6 +11,7 @@ import {
 } from './global/Global.filter';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma.module';
+import { ReleasesModule } from './releases/releases.module';
 import { AgentModule } from './agent/agent.module';
 import { TunnelModule } from './tunnel/tunnel.module';
 import { SentryGlobalFilter, SentryModule } from '@sentry/nestjs/setup';
@@ -26,6 +27,7 @@ import { MailerModule } from './mailer/mailer.module';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AgentModule,
+    ReleasesModule,
     TunnelModule,
     UtilityModule,
     MailerModule.forRootAsync(),
