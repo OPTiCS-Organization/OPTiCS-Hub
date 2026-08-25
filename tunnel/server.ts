@@ -12,8 +12,6 @@ import net from 'net'
 import { claim, register, release } from './registry.ts';
 
 const controlServer = net.createServer((socket) => {
-  console.log('Local client connected to tunnel');
-
   let buffer = Buffer.alloc(0);
   let token = '';
 
@@ -42,7 +40,6 @@ const controlServer = net.createServer((socket) => {
       socket.pipe(exist.socket);
       exist.socket.pipe(socket);
 
-      console.log(`Token found and removing listener: ${token}`);
     } else {
       register(token, socket, buffer.subarray(idx + 1), () => onClose());
       console.log(`Token not found. hibernating until connection establishes.`);

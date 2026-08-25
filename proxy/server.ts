@@ -13,20 +13,21 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { register, release } from '../tunnel/registry.ts';
+import { TUNNEL_OUTCOME, isTunnelOutcome, type TunnelOutcome } from '../src/tunnel/tunnel-outcome.ts';
+import { presentationFor, type ErrorTemplateName } from './outcome-presentation.ts';
 import dotenv from 'dotenv';
 import { ulid } from 'ulid';
 dotenv.config({ path: '../OPTiCS-Infra/env/gateway.env' })
 
 // 프로세스는 항상 OPTiCS-Hub 루트(WORKDIR)에서 기동되므로 cwd 기준 상대 경로로 읽는다.
-const serviceUnavailableTemplate = fs.readFileSync(
-  path.join(process.cwd(), 'proxy', 'templates', 'ServiceTemporarilyUnavailable.html'),
-  'utf-8',
-);
+function readTemplate(name: ErrorTemplateName) {
+  return fs.readFileSync(path.join(process.cwd(), 'proxy', 'templates', `${name}.html`), 'utf-8');
+}
 
-const requestedServiceNotFoundTemplate = fs.readFileSync(
-  path.join(process.cwd(), 'proxy', 'templates', 'RequestedServiceNotFound.html'),
-  'utf-8',
-);
+const TEMPLATES: Record<ErrorTemplateName, string> = {
+  RequestedServiceNotFound: readTemplate('RequestedServiceNotFound'),
+  BadGateway: readTemplate('BadGateway'),
+};
 
 // Host 헤더 등 외부 입력이 그대로 들어오므로 치환 값은 반드시 이스케이프한다.
 function escapeHtml(value: string) {
@@ -38,14 +39,20 @@ function escapeHtml(value: string) {
     .replace(/'/g, '&#39;');
 }
 
-function renderTemplate(template: string, vars: Record<string, string>) {
+/**
+ * vars는 이스케이프해서, rawVars는 그대로 삽입한다.
+ * rawVars에는 우리가 코드에서 만든 HTML 조각만 넣어야 하며, 그 안에 들어가는
+ * 외부 입력은 조각을 만들 때 이미 이스케이프되어 있어야 한다.
+ */
+function renderTemplate(
+  template: string,
+  vars: Record<string, string>,
+  rawVars: Record<string, string> = {},
+) {
   return template.replace(/{{\s*(\w+)\s*}}/g, (match, key: string) => {
+    if (Object.prototype.hasOwnProperty.call(rawVars, key)) return rawVars[key];
     return Object.prototype.hasOwnProperty.call(vars, key) ? escapeHtml(vars[key]) : match;
   });
-}
-
-function renderServiceUnavailablePage(vars: Record<string, string>) {
-  return renderTemplate(serviceUnavailableTemplate, vars);
 }
 
 // Cloudflare가 프록시한 요청에는 cf-ray 헤더가 붙는다. CF를 거치지 않은
@@ -55,13 +62,33 @@ function readCfRay(header: string[]) {
   return line === undefined ? '-' : line.replace(/^cf-ray:\s*/i, '').trim() || '-';
 }
 
-function renderServiceNotFoundPage(requestUrl: string, requestId: string, rayId: string) {
-  return renderTemplate(requestedServiceNotFoundTemplate, {
-    requestUrl: requestUrl || 'unknown host',
-    requestId,
-    rayId,
-    timestamp: new Date().toISOString(),
-  });
+type ErrorContext = {
+  host: string;
+  /** 다이어그램 마지막 노드 이름. 워크스페이스 루트 요청은 서비스 서브도메인이 비어 있다. */
+  serviceName?: string;
+  requestId: string;
+  rayId: string;
+};
+
+/**
+ * 실패 원인(outcome) 하나로 상태 코드·템플릿·문구를 모두 결정해 완성된 HTTP 응답을 만든다.
+ */
+function renderErrorResponse(outcome: Exclude<TunnelOutcome, 'success'>, context: ErrorContext) {
+  const presentation = presentationFor(outcome);
+  const host = context.host || 'unknown host';
+  const body = renderTemplate(
+    TEMPLATES[presentation.template],
+    {
+      requestUrl: host,
+      serviceName: context.serviceName || host,
+      requestId: context.requestId,
+      rayId: context.rayId,
+      outcome,
+      timestamp: new Date().toISOString(),
+    },
+    { detail: presentation.detail(escapeHtml(host)) },
+  );
+  return makeHtmlResponse(presentation.status, presentation.reason, body);
 }
 
 const proxyServer = net.createServer((socket) => {
@@ -87,10 +114,10 @@ const proxyServer = net.createServer((socket) => {
     const hostLine = header.find(line => line.toLowerCase().startsWith('host:'));
     if (hostLine === undefined) {
       logDiagnostic('proxy_request_rejected', requestId, {
-        outcome: 'missing_host',
+        outcome: TUNNEL_OUTCOME.MISSING_HOST,
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(makeHtmlResponse(404, 'Requested Service Not Found', renderServiceNotFoundPage('', requestId, rayId)));
+      socket.end(renderErrorResponse(TUNNEL_OUTCOME.MISSING_HOST, { host: '', requestId, rayId }));
       return;
     }
     const route = parseRouteFromHostHeader(hostLine);
@@ -99,10 +126,10 @@ const proxyServer = net.createServer((socket) => {
       logDiagnostic('proxy_request_rejected', requestId, {
         method,
         host: rejectedHost,
-        outcome: 'invalid_route',
+        outcome: TUNNEL_OUTCOME.INVALID_ROUTE,
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(makeHtmlResponse(404, 'Requested Service Not Found', renderServiceNotFoundPage(rejectedHost, requestId, rayId)));
+      socket.end(renderErrorResponse(TUNNEL_OUTCOME.INVALID_ROUTE, { host: rejectedHost, requestId, rayId }));
       return;
     }
 
@@ -114,17 +141,15 @@ const proxyServer = net.createServer((socket) => {
       logDiagnostic('agent_not_responding', requestId, {
         method,
         host,
-        outcome: 'service temporarily unavailable',
+        outcome: TUNNEL_OUTCOME.AGENT_NO_TUNNEL,
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      const page = renderServiceUnavailablePage({
+      socket.end(renderErrorResponse(TUNNEL_OUTCOME.AGENT_NO_TUNNEL, {
+        host,
         serviceName: serviceSubdomain,
-        requestUrl: host,
         requestId,
         rayId,
-        timestamp: new Date().toISOString(),
-      });
-      socket.end(makeHtmlResponse(503, 'Service Temporarily Unavailable', page));
+      }));
     }, {
       requestId,
       startedAt: requestStartedAt,
@@ -174,23 +199,20 @@ const proxyServer = net.createServer((socket) => {
       });
 
       if (!response.ok) {
-        const status = response.status === 404 ? 404 : 503;
-        const reason = response.status === 404 ? 'Requested Service Not Found' : 'Service Temporarily Unavailable';
+        const outcome = await readHubOutcome(response);
         logDiagnostic('proxy_hub_request_failed', requestId, {
           method,
           host,
           hub_status: response.status,
+          outcome,
           elapsed_ms: elapsedSince(requestStartedAt),
         });
-        socket.end(status === 404
-          ? makeHtmlResponse(404, reason, renderServiceNotFoundPage(host, requestId, rayId))
-          : makeHtmlResponse(503, reason, renderServiceUnavailablePage({
-            serviceName: serviceSubdomain,
-            requestUrl: host,
-            requestId,
-            rayId,
-            timestamp: new Date().toISOString(),
-          })));
+        socket.end(renderErrorResponse(outcome, {
+          host,
+          serviceName: serviceSubdomain,
+          requestId,
+          rayId,
+        }));
         return;
       }
 
@@ -206,17 +228,16 @@ const proxyServer = net.createServer((socket) => {
         elapsed_ms: elapsedSince(requestStartedAt),
       });
     } catch (error) {
-      socket.end(makeHtmlResponse(503, 'Service Temporarily Unavailable', renderServiceUnavailablePage({
+      socket.end(renderErrorResponse(TUNNEL_OUTCOME.HUB_UNREACHABLE, {
+        host,
         serviceName: serviceSubdomain,
-        requestUrl: host,
         requestId,
         rayId,
-        timestamp: new Date().toISOString(),
-      })));
+      }));
       logDiagnostic('proxy_hub_request_error', requestId, {
         method,
         host,
-        outcome: 'error',
+        outcome: TUNNEL_OUTCOME.HUB_UNREACHABLE,
         error: error instanceof Error ? error.message : String(error),
         elapsed_ms: elapsedSince(requestStartedAt),
       });
@@ -242,8 +263,21 @@ const proxyServer = net.createServer((socket) => {
   socket.on('data', onData);
 });
 
+// 서버 인스턴스를 돌려준다. 테스트가 끝난 뒤 닫을 수 있어야 하기 때문이다.
 export function startProxyServer(port: number) {
-  proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
+  return proxyServer.listen(port, () => console.log(`Proxy server is running on ${port}`))
+}
+
+/**
+ * Hub는 실패 원인을 응답 본문의 outcome으로 알려 준다. 본문을 못 읽거나 값이
+ * 어휘에 없으면(구버전 Hub, 게이트웨이 외부에서 온 오류 등) 상태 코드로 최선의
+ * 추정을 한다.
+ */
+async function readHubOutcome(response: Response): Promise<Exclude<TunnelOutcome, 'success'>> {
+  const body = await response.json().catch(() => null) as { outcome?: unknown } | null;
+  const outcome = body?.outcome;
+  if (isTunnelOutcome(outcome) && outcome !== TUNNEL_OUTCOME.SUCCESS) return outcome;
+  return response.status === 404 ? TUNNEL_OUTCOME.SERVICE_NOT_FOUND : TUNNEL_OUTCOME.HUB_REJECTED;
 }
 
 function makeHtmlResponse(status: number, reason: string, body: string) {
