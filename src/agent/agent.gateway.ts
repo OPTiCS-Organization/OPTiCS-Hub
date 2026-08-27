@@ -8,6 +8,8 @@ import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
 
+const MINIMUM_PROTOCOL_VERSION = 1;
+
 type ServiceLogPayload = {
   serviceIndex: number;
   log: string;
@@ -292,7 +294,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * 연결 수락 시 일단 IP부터 저장,
    * Agent가 Validation 이벤트 emit할 때까지 대기
-   * @param client 
+   * @param client
    */
   async handleConnection() {
     log('[Agent Gateway] Connection Established', 200, 'INFO')
@@ -319,23 +321,35 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('register')
-  async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion?: string | null }) {
-    log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
-    log(payload)
+  async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion: string; protocolVersion: number; _sig: string | null }) {
+    // 프로토콜 버전이 존재하지 않으면 구버전, 최소 지원 버전보다 낮으면 연결 거부
+    if (!payload.protocolVersion || payload.protocolVersion < MINIMUM_PROTOCOL_VERSION) {
+      log(`[Agent Gateway] Disconnecting agent ${payload.agentUuid}: Unsupported protocol version(v${payload.protocolVersion}).`);
+      client.emit('register', { code: 'unsupported_protocol', data: { minimum: 1, maximum: 1 } });
+      client.disconnect(true);
+      return;
+    }
+
+    log(`[Agent Gateway] Validating agent: ${payload.agentUuid}`, 200, 'INFO')
     const rawIp = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace(/^::ffff:/, '');
 
-    const agent = await this.agentService.registerAgent(ip, payload.agentUuid, payload.agentVersion ?? null);
+    // 에이전트를 등록한다.
+    const agent = await this.agentService.registerAgent(ip, payload.agentUuid, payload.agentVersion, payload.protocolVersion, payload._sig);
+    log(`[Agent Gateway] Agent registation finished.`);
 
-    this.clearOfflineTimer(agent.agentUuid);
-    this.agentUuidToSocketId.set(agent.agentUuid, client.id);
-    client.data.agentCode = agent.agentCode;
-    client.data.agentUuid = agent.agentUuid;
-    client.data.workspaceIndex = agent.agentParentWorkspace;
+    this.clearOfflineTimer(agent.uuid);
+    this.agentUuidToSocketId.set(agent.uuid, client.id);
+    client.data.agentCode = agent.code;
+    client.data.agentUuid = agent.uuid;
+    client.data.signingSecret = agent.signingSecret;
+    client.data.agentIp = agent.ip;
+    client.data.workspaceIndex = agent.parentWorkspace;
     client.emit('register', agent);
+    log(`[Agent Gateway] Registration information sent.`);
     // 업데이트 직후의 재접속이라면 보고된 버전으로 성공/롤백을 판정한다.
-    await this.agentUpdateService.handleReconnect(agent.agentUuid, payload.agentVersion ?? null);
-    this.consoleGateway.notifyWorkspaceUpdated(agent.agentParentWorkspace);
+    await this.agentUpdateService.handleReconnect(agent.uuid, payload.agentVersion ?? null);
+    this.consoleGateway.notifyWorkspaceUpdated(agent.parentWorkspace);
   }
 
   async handleDisconnect(client: Socket) {

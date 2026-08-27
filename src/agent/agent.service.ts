@@ -6,6 +6,9 @@ import log from 'spectra-log';
 import { ConsoleGateway } from './console.gateway';
 import { ReleaseCatalogService } from 'src/releases/release-catalog.service';
 import { supportsRemoteUpdate } from 'src/global/agent-capability';
+import * as crypto from 'crypto';
+import { Agent } from './types/Agent.type';
+
 
 @Injectable()
 export class AgentService implements OnModuleInit {
@@ -50,39 +53,55 @@ export class AgentService implements OnModuleInit {
   }
 
   /**
-   * 
-   * @param ip 
-   * @param agentUuid 
-   * @returns 
-   * 
+   *
+   * @param ip
+   * @param agentUuid
+   * @returns
+   *
    * 에이전트에서 이미 존재하는 UUID가 있다면 보내주고, 없으면 Null을 전달해 줌
    * 데이터베이스에서 일치하는 UUID를 찾으면 IP가 같은지 검사
    *    ㄴ 같다면 같은 IP
    *    ㄴ 다르다면 IP 업데이트
    * 일치하는 UUID를 찾지 못하면 새 에이전트 생성 후 응답
    */
-  public async registerAgent(ip: string, agentUuid: string | null, agentVersion: string | null = null): Promise<{ agentCode: string, agentUuid: string, agentIp: string, agentParentWorkspace: number | null }> {
-    const agent: { agentCode: string | undefined, agentUuid: string | undefined, agentIp: string, agentParentWorkspace: number | null } = {
-      agentCode: undefined,
-      agentUuid: undefined,
-      agentIp: ip,
-      agentParentWorkspace: null,
+  public async registerAgent(ip: string, agentUuid: string | null, agentVersion: string, protocolVersion: number, signature: string | null): Promise<{ ip: string, code: string, uuid: string, signingSecret: string | null, parentWorkspace: number | null }> {
+    /**
+     * uuid 값이 NULL인가? => 새 에이전트 생성
+     *                    아니면 UUID로 기존 에이전트 검색
+     */
+
+    /**
+     * Case
+     * UUID is EXISTS
+     * UUID is NULL
+     * UUID is EXIST but doesn't exist on DB
+     */
+    const agent: Agent = {
+      code: null,
+      parentWorkspace: null,
+      ip: ip,
+      uuid: agentUuid,
+      signingSecret: signature,
+      protocolVersion: protocolVersion,
     };
-    if (agentUuid) { // UUID가 있으면
+
+    if (agent.uuid) { // UUID가 있으면
       const exist = await this.prismaService.agents.findFirst({
         where: {
-          agent_uuid: agentUuid,
+          agent_uuid: agent.uuid,
         },
         select: {
           agent_code: true,
           agent_uuid: true,
           agent_parent_workspace: true,
+          agent_signing_secret: true,
         }
-      })
+      });
+
       if (exist) { // 일치하는 UUID를 찾으면
         const updatedAgent = await this.prismaService.agents.update({
           where: {
-            agent_uuid: agentUuid
+            agent_uuid: agent.uuid
           },
           data: {
             agent_status: 'online',
@@ -91,47 +110,42 @@ export class AgentService implements OnModuleInit {
             agent_version: agentVersion,
           },
         });
-        agent.agentCode = updatedAgent.agent_code;
-        agent.agentUuid = updatedAgent.agent_uuid;
-        agent.agentParentWorkspace = updatedAgent.agent_parent_workspace;
-      } else { // 일치하는 UUID를 찾지 못하면
-        const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
-        const newAgent = await this.prismaService.agents.create({
-          data: {
-            agent_ip: ip,
-            agent_code: newCode,
-            agent_name: newCode,
-            agent_connection: 'unlinked',
-            agent_status: 'online',
-            agent_version: agentVersion,
-          },
-        });
-        agent.agentCode = newAgent.agent_code;
-        agent.agentUuid = newAgent.agent_uuid;
-        agent.agentParentWorkspace = newAgent.agent_parent_workspace;
+        agent.code = updatedAgent.agent_code;
+        agent.uuid = updatedAgent.agent_uuid;
+        agent.parentWorkspace = updatedAgent.agent_parent_workspace;
+
+        return {
+          ip: agent.ip,
+          code: agent.code,
+          uuid: agent.uuid,
+          signingSecret: null,
+          parentWorkspace: agent.parentWorkspace,
+        };
       }
-    } else { // UUID가 NULL이면
-      const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
-      const newAgent = await this.prismaService.agents.create({
-        data: {
-          agent_ip: ip,
-          agent_code: newCode,
-          agent_name: newCode,
-          agent_connection: 'unlinked',
-          agent_status: 'online',
-          agent_version: agentVersion,
-        },
-      });
-      agent.agentCode = newAgent.agent_code;
-      agent.agentUuid = newAgent.agent_uuid;
-      agent.agentParentWorkspace = newAgent.agent_parent_workspace;
     }
+    // UUID가 NULL이거나 일치하는 UUID를 찾지 못 했을 때
+    const newCode = `${generate({ exactly: 1, join: '' })}-${generate({ exactly: 1, join: '' })}`.toUpperCase();
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    const newAgent = await this.prismaService.agents.create({
+      data: {
+        agent_ip: ip,
+        agent_code: newCode,
+        agent_name: newCode,
+        agent_signing_secret: newSecret,
+        agent_protocol_version: agent.protocolVersion,
+        agent_connection: 'unlinked',
+        agent_status: 'online',
+        agent_version: agentVersion,
+      },
+    });
+
     return {
-      agentCode: agent.agentCode,
-      agentUuid: agent.agentUuid,
-      agentIp: agent.agentIp,
-      agentParentWorkspace: agent.agentParentWorkspace,
-    };
+      ip: newAgent.agent_ip,
+      code: newAgent.agent_code,
+      uuid: newAgent.agent_uuid,
+      signingSecret: newAgent.agent_signing_secret,
+      parentWorkspace: newAgent.agent_parent_workspace,
+    }
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
