@@ -7,7 +7,7 @@ import { AgentUpdateService } from './agent-update.service';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
-import { ReplayGuard, verify } from 'src/global/hash.util';
+import { ReplayGuard, sign, verify } from 'src/global/hash.util';
 import { PROTOCOL_RESULT_CODE } from './types/ResultCode.type';
 
 const MINIMUM_PROTOCOL_VERSION = 1;
@@ -330,8 +330,18 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion: string; protocolVersion: number; _sig: string | null }) {
     // 프로토콜 버전이 존재하지 않으면 구버전, 최소 지원 버전보다 낮으면 연결 거부
     if (!payload.protocolVersion || payload.protocolVersion < MINIMUM_PROTOCOL_VERSION || payload.protocolVersion > MAXIMUM_PROTOCOL_VERSION) {
+      /**
+       * "너무 낡음"과 "Hub가 모르는 버전"을 구분해서 알려준다.
+       *
+       * 둘 다 접속 실패지만 운영자가 해야 할 일이 정반대다. 전자는 Agent를 올려야 하고,
+       * 후자는 Agent가 Hub보다 앞서 있다는 뜻이라 Hub를 올려야 한다.
+       */
+      const code = payload.protocolVersion > MAXIMUM_PROTOCOL_VERSION
+        ? PROTOCOL_RESULT_CODE.UNKNOWN_PROTOCOL_VERSION
+        : PROTOCOL_RESULT_CODE.DEPRECATED_PROTOCOL_VERSION;
+
       log(`[Agent Gateway] Disconnecting agent ${payload.agentUuid}: Unsupported protocol version(v${payload.protocolVersion}).`);
-      client.emit('register', { code: 'unsupported_protocol', data: { minimum: 1, maximum: 1 } });
+      client.emit('register', { code, data: { minimum: MINIMUM_PROTOCOL_VERSION, maximum: MAXIMUM_PROTOCOL_VERSION } });
       client.disconnect(true);
       return;
     }
@@ -446,20 +456,49 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
+  /**
+   * Agent로 나가는 유일한 발신 통로. 페이로드에 서명을 붙인다.
+   *
+   * Agent도 Hub와 같은 이유로 이 서명을 요구한다. Agent 입장에서 `command`는
+   * "이 코드를 받아 실행하라"는 지시이므로, 보낸 쪽이 정말 Hub인지 확인할 수단이
+   * 없으면 소켓을 가로챈 쪽이 그대로 원격 실행 권한을 얻는다.
+   *
+   * 비밀은 소켓에 붙여둔 값을 쓴다. 방을 거치지 않고 소켓 객체를 직접 꺼내는 이유는
+   * `server.to(socketId)`로는 그 소켓의 data에 접근할 수 없기 때문이다.
+   */
   sendToAgent(agentUuid: string, event: string, payload: unknown): boolean {
-    const socketId = this.agentUuidToSocketId.get(agentUuid);
-    if (!socketId) return false;
-    this.server.to(socketId).emit(event, payload);
+    const socket = this.getAgentSocket(agentUuid);
+    if (!socket) return false;
+
+    const secret = socket.data.signingSecret as string | null | undefined;
+    if (!secret) {
+      log(`[Agent Gateway] {{ red : bold : SIGNATURE:NO_SECRET }}\n  event: ${event}\n  agent: ${agentUuid}\n  Outbound event was dropped: the socket has no signing secret.`, 500, 'ERROR');
+      return false;
+    }
+
+    socket.emit(event, sign(event, payload, secret));
     return true;
   }
 
-  disconnectAgent(agentUuid: string): boolean {
+  /** 등록된 Agent의 소켓 객체를 찾는다. 없으면 null. */
+  private getAgentSocket(agentUuid: string): Socket | null {
     const socketId = this.agentUuidToSocketId.get(agentUuid);
-    if (!socketId) return false;
+    if (!socketId) return null;
+    return this.server.sockets.sockets.get(socketId) ?? null;
+  }
 
-    const socket = this.server.sockets.sockets.get(socketId);
-    socket?.emit('command', { command: 'DISCONNECT' });
-    setTimeout(() => socket?.disconnect(true), 250);
+  disconnectAgent(agentUuid: string): boolean {
+    const socket = this.getAgentSocket(agentUuid);
+    if (!socket) return false;
+
+    /**
+     * DISCONNECT도 sendToAgent를 거친다.
+     *
+     * 예전에는 여기서 소켓에 직접 emit했는데, Agent가 서명을 요구하기 시작하면
+     * 그 미서명 명령만 조용히 무시되어 "끊기 명령을 보냈는데 안 끊긴다"가 된다.
+     */
+    this.sendToAgent(agentUuid, 'command', { command: 'DISCONNECT' });
+    setTimeout(() => socket.disconnect(true), 250);
     this.agentUuidToSocketId.delete(agentUuid);
     this.clearOfflineTimer(agentUuid);
     return true;
