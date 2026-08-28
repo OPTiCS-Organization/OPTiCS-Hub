@@ -107,6 +107,7 @@ export class AgentService implements OnModuleInit {
             agent_status: 'online',
             agent_ip: ip,
             agent_last_online: new Date(),
+            agent_protocol_version: protocolVersion,
             agent_version: agentVersion,
           },
         });

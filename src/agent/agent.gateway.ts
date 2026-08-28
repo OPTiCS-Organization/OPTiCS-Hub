@@ -9,6 +9,7 @@ import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
 
 const MINIMUM_PROTOCOL_VERSION = 1;
+const MAXIMUM_PROTOCOL_VERSION = 1;
 
 type ServiceLogPayload = {
   serviceIndex: number;
@@ -323,7 +324,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('register')
   async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion: string; protocolVersion: number; _sig: string | null }) {
     // 프로토콜 버전이 존재하지 않으면 구버전, 최소 지원 버전보다 낮으면 연결 거부
-    if (!payload.protocolVersion || payload.protocolVersion < MINIMUM_PROTOCOL_VERSION) {
+    if (!payload.protocolVersion || payload.protocolVersion < MINIMUM_PROTOCOL_VERSION || payload.protocolVersion > MAXIMUM_PROTOCOL_VERSION) {
       log(`[Agent Gateway] Disconnecting agent ${payload.agentUuid}: Unsupported protocol version(v${payload.protocolVersion}).`);
       client.emit('register', { code: 'unsupported_protocol', data: { minimum: 1, maximum: 1 } });
       client.disconnect(true);
@@ -345,7 +346,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.data.signingSecret = agent.signingSecret;
     client.data.agentIp = agent.ip;
     client.data.workspaceIndex = agent.parentWorkspace;
-    client.emit('register', agent);
+    client.emit('register', { code: 'ok', data: agent });
     log(`[Agent Gateway] Registration information sent.`);
     // 업데이트 직후의 재접속이라면 보고된 버전으로 성공/롤백을 판정한다.
     await this.agentUpdateService.handleReconnect(agent.uuid, payload.agentVersion ?? null);
@@ -355,7 +356,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
     const agentUuid = (client.data.agentUuid as string | undefined) ?? (client.handshake.auth as { agentUuid?: string }).agentUuid;
-    log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
+    log(`[Agent Gateway] [Disconnected] ${agentUuid}`)
     if (agentCode && agentUuid) {
       if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
       this.consoleGateway.closeAgentConnections(agentUuid);
