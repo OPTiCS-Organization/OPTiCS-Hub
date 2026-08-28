@@ -13,16 +13,6 @@ import { PROTOCOL_RESULT_CODE } from './types/ResultCode.type';
 const MINIMUM_PROTOCOL_VERSION = 1;
 const MAXIMUM_PROTOCOL_VERSION = 1;
 
-/**
- * 서명 검증을 실제로 강제할지 여부.
- *
- * 기본값이 false인 이유는 전환 순서 때문이다. 배포된 Agent 중에는 프로토콜 v1이면서
- * 아직 서명을 붙이지 않는 버전(0.6.0 이전 빌드)이 남아 있고, 켠 채로 배포하면 그것들이
- * 한꺼번에 끊긴다. 먼저 false로 올려 SIGNATURE:REJECTED 로그가 0이 되는지 확인하고,
- * 그다음 true로 올린다.
- */
-const SIGNATURE_ENFORCED = process.env.AGENT_SIGNATURE_ENFORCED === 'true';
-
 /** 서명 검증을 건너뛰는 이벤트. register는 소켓에 비밀이 붙기 전이라 따로 검증한다. */
 const UNVERIFIED_EVENTS = new Set(['register']);
 
@@ -361,12 +351,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (knownSecret) {
         const verification = verify('register', payload, knownSecret);
         if (!verification.ok) {
-          log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: register\n  agent: ${payload.agentUuid}\n  reason: ${verification.reason}\n  enforced: ${SIGNATURE_ENFORCED}`, 401, 'ERROR');
-          if (SIGNATURE_ENFORCED) {
-            client.emit('register', { code: PROTOCOL_RESULT_CODE.INVALID_SIGNATURE, data: { reason: verification.reason } });
-            client.disconnect(true);
-            return;
-          }
+          log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: register\n  agent: ${payload.agentUuid}\n  reason: ${verification.reason}`, 401, 'ERROR');
+          client.emit('register', { code: PROTOCOL_RESULT_CODE.INVALID_SIGNATURE, data: { reason: verification.reason } });
+          client.disconnect(true);
+          return;
         }
       }
     }
@@ -427,6 +415,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * 검증에 실패한 패킷은 next()를 부르지 않고 그대로 버린다. 에러로 넘기면
    * socket.io가 클라이언트에 error 이벤트를 돌려주는데, 위조 패킷을 보낸 쪽에
    * "무엇이 틀렸는지"를 알려줄 이유가 없다.
+   *
+   * 소켓을 끊지 않고 패킷만 버리는 이유는, 정상 Agent가 시계 밀림(EXPIRED)으로
+   * 일시적으로 걸릴 수 있기 때문이다. 그때 연결을 끊으면 재연결 폭풍이 된다.
+   * 신원 자체가 의심스러운 경우는 register에서 이미 끊었다.
    */
   private guardIncomingPackets(client: Socket) {
     // 같은 소켓에서 register가 두 번 오면 미들웨어가 중복 설치된다.
@@ -437,18 +429,20 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (UNVERIFIED_EVENTS.has(event)) return next();
 
       /**
-       * 비밀이 없는 Agent는 검증할 근거 자체가 없으므로 통과시킨다.
-       * 이 상태는 다음 register에서 비밀이 발급되며 자연히 해소된다.
+       * 이 미들웨어는 register를 통과한 소켓에만 붙고, 그 시점에 비밀은 반드시 존재한다.
+       * (registerAgent가 신규 발급하거나, 없으면 재발급한 뒤에야 여기까지 온다)
+       * 그러므로 비밀이 비어 있다는 것은 등록 경로가 깨졌다는 뜻이고, 통과시킬 이유가 없다.
        */
       const secret = client.data.signingSecret as string | null | undefined;
-      if (!secret) return next();
+      if (!secret) {
+        log(`[Agent Gateway] {{ red : bold : SIGNATURE:NO_SECRET }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  The socket passed registration without a signing secret.`, 500, 'ERROR');
+        return;
+      }
 
       const verification = verify(event, payload, secret, { replayGuard: client.data.replayGuard as ReplayGuard });
       if (verification.ok) return next();
 
-      log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  reason: ${verification.reason}\n  enforced: ${SIGNATURE_ENFORCED}`, 401, 'ERROR');
-      if (SIGNATURE_ENFORCED) return;
-      return next();
+      log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  reason: ${verification.reason}`, 401, 'ERROR');
     });
   }
 
