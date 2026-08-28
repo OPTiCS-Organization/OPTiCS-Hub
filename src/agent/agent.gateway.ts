@@ -1,5 +1,5 @@
 import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, MessageBody, ConnectedSocket } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Namespace, Server, Socket } from 'socket.io';
 import { Injectable, forwardRef, Inject } from '@nestjs/common';
 import { AgentService } from './agent.service';
 import { ConsoleGateway } from './console.gateway';
@@ -480,11 +480,20 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return true;
   }
 
-  /** 등록된 Agent의 소켓 객체를 찾는다. 없으면 null. */
+  /**
+   * 등록된 Agent의 소켓 객체를 찾는다. 없으면 null.
+   *
+   * `@WebSocketServer()`는 namespace가 지정된 게이트웨이에 Server가 아니라 **Namespace**를
+   * 주입한다. Namespace에서는 `.sockets`가 곧 `Map<socketId, Socket>`이라,
+   * Server 기준으로 쓴 `this.server.sockets.sockets`는 런타임에 undefined가 된다.
+   * 선언 타입이 Server라 타입 검사만으로는 드러나지 않으므로 여기서 좁혀 쓴다.
+   */
   private getAgentSocket(agentUuid: string): Socket | null {
     const socketId = this.agentUuidToSocketId.get(agentUuid);
     if (!socketId) return null;
-    return this.server.sockets.sockets.get(socketId) ?? null;
+
+    const sockets = (this.server as unknown as Namespace).sockets;
+    return sockets.get(socketId) ?? null;
   }
 
   disconnectAgent(agentUuid: string): boolean {
