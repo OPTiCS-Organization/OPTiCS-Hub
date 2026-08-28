@@ -73,6 +73,8 @@ model agents {
   agent_ip                String
   agent_code              String           @unique
   agent_uuid              String           @unique @default(uuid())
+  agent_signing_secret    String?
+  agent_protocol_version  Int?
   agent_name              String
   agent_parent_workspace  Int?
   agent_connection        ConnectionStatus @default(unlinked)

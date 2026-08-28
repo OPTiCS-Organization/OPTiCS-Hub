@@ -7,6 +7,14 @@ import { AgentUpdateService } from './agent-update.service';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
+import { ReplayGuard, sign, verify } from 'src/global/hash.util';
+import { PROTOCOL_RESULT_CODE } from './types/ResultCode.type';
+
+const MINIMUM_PROTOCOL_VERSION = 1;
+const MAXIMUM_PROTOCOL_VERSION = 1;
+
+/** 서명 검증을 건너뛰는 이벤트. register는 소켓에 비밀이 붙기 전이라 따로 검증한다. */
+const UNVERIFIED_EVENTS = new Set(['register']);
 
 type ServiceLogPayload = {
   serviceIndex: number;
@@ -292,7 +300,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /**
    * 연결 수락 시 일단 IP부터 저장,
    * Agent가 Validation 이벤트 emit할 때까지 대기
-   * @param client 
+   * @param client
    */
   async handleConnection() {
     log('[Agent Gateway] Connection Established', 200, 'INFO')
@@ -319,29 +327,84 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('register')
-  async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion?: string | null }) {
-    log(`[Agent Gateway] Validation Requested`, 200, 'TRACE')
-    log(payload)
+  async handleValidation(client: Socket, payload: { agentUuid: string | null; agentVersion: string; protocolVersion: number; _sig: string | null }) {
+    // 프로토콜 버전이 존재하지 않으면 구버전, 최소 지원 버전보다 낮으면 연결 거부
+    if (!payload.protocolVersion || payload.protocolVersion < MINIMUM_PROTOCOL_VERSION || payload.protocolVersion > MAXIMUM_PROTOCOL_VERSION) {
+      /**
+       * "너무 낡음"과 "Hub가 모르는 버전"을 구분해서 알려준다.
+       *
+       * 둘 다 접속 실패지만 운영자가 해야 할 일이 정반대다. 전자는 Agent를 올려야 하고,
+       * 후자는 Agent가 Hub보다 앞서 있다는 뜻이라 Hub를 올려야 한다.
+       */
+      const code = payload.protocolVersion > MAXIMUM_PROTOCOL_VERSION
+        ? PROTOCOL_RESULT_CODE.UNKNOWN_PROTOCOL_VERSION
+        : PROTOCOL_RESULT_CODE.DEPRECATED_PROTOCOL_VERSION;
+
+      log(`[Agent Gateway] Disconnecting agent ${payload.agentUuid}: Unsupported protocol version(v${payload.protocolVersion}).`);
+      client.emit('register', { code, data: { minimum: MINIMUM_PROTOCOL_VERSION, maximum: MAXIMUM_PROTOCOL_VERSION } });
+      client.disconnect(true);
+      return;
+    }
+
+    log(`[Agent Gateway] Validating agent: ${payload.agentUuid}`, 200, 'INFO')
+
+    /**
+     * 자신이 기존 Agent라고 주장하면 그 주장을 서명으로 증명하게 한다.
+     *
+     * UUID는 페이로드에 실려 오는 값이라 그것만 보고 등록하면, UUID를 아는 누구든
+     * 남의 Agent로 접속해 그 워크스페이스의 명령을 대신 받을 수 있다.
+     * 비밀이 아직 없는 Agent는 증명할 수단이 없으므로 통과시키고, registerAgent가
+     * 이번 등록에서 비밀을 발급해 다음 접속부터 증명할 수 있게 만든다.
+     */
+    if (payload.agentUuid) {
+      const knownSecret = await this.agentService.getSigningSecret(payload.agentUuid);
+      if (knownSecret) {
+        const verification = verify('register', payload, knownSecret);
+        if (!verification.ok) {
+          log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: register\n  agent: ${payload.agentUuid}\n  reason: ${verification.reason}`, 401, 'ERROR');
+          client.emit('register', { code: PROTOCOL_RESULT_CODE.INVALID_SIGNATURE, data: { reason: verification.reason } });
+          client.disconnect(true);
+          return;
+        }
+      }
+    }
+
     const rawIp = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace(/^::ffff:/, '');
 
-    const agent = await this.agentService.registerAgent(ip, payload.agentUuid, payload.agentVersion ?? null);
+    // 에이전트를 등록한다.
+    const agent = await this.agentService.registerAgent(ip, payload.agentUuid, payload.agentVersion, payload.protocolVersion, payload._sig);
+    log(`[Agent Gateway] Agent registation finished.`);
 
-    this.clearOfflineTimer(agent.agentUuid);
-    this.agentUuidToSocketId.set(agent.agentUuid, client.id);
-    client.data.agentCode = agent.agentCode;
-    client.data.agentUuid = agent.agentUuid;
-    client.data.workspaceIndex = agent.agentParentWorkspace;
-    client.emit('register', agent);
+    this.clearOfflineTimer(agent.uuid);
+    this.agentUuidToSocketId.set(agent.uuid, client.id);
+    client.data.agentCode = agent.code;
+    client.data.agentUuid = agent.uuid;
+    client.data.agentIp = agent.ip;
+    client.data.workspaceIndex = agent.parentWorkspace;
+
+    /**
+     * 이후 이벤트를 검증할 비밀을 소켓에 붙인다.
+     *
+     * `agent.signingSecret`을 그대로 쓰면 안 된다. 그건 "이번에 발급해서 보내줄 값"이라
+     * 이미 비밀을 가진 Agent에게는 null이고, 그러면 그 소켓의 모든 이벤트가
+     * 검증 불가가 된다. 유효한 비밀을 다시 읽어와 붙인다.
+     */
+    client.data.signingSecret = agent.signingSecret ?? await this.agentService.getSigningSecret(agent.uuid);
+    client.data.replayGuard = new ReplayGuard();
+    this.guardIncomingPackets(client);
+
+    client.emit('register', { code: PROTOCOL_RESULT_CODE.OK, data: agent });
+    log(`[Agent Gateway] Registration information sent.`);
     // 업데이트 직후의 재접속이라면 보고된 버전으로 성공/롤백을 판정한다.
-    await this.agentUpdateService.handleReconnect(agent.agentUuid, payload.agentVersion ?? null);
-    this.consoleGateway.notifyWorkspaceUpdated(agent.agentParentWorkspace);
+    await this.agentUpdateService.handleReconnect(agent.uuid, payload.agentVersion ?? null);
+    this.consoleGateway.notifyWorkspaceUpdated(agent.parentWorkspace);
   }
 
   async handleDisconnect(client: Socket) {
     const agentCode = client.data.agentCode as string | undefined;
     const agentUuid = (client.data.agentUuid as string | undefined) ?? (client.handshake.auth as { agentUuid?: string }).agentUuid;
-    log(`[Agent Gateway]: [Disconnected] ${agentUuid}`)
+    log(`[Agent Gateway] [Disconnected] ${agentUuid}`)
     if (agentCode && agentUuid) {
       if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
       this.consoleGateway.closeAgentConnections(agentUuid);
@@ -352,20 +415,90 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  /**
+   * 등록된 소켓으로 들어오는 모든 이벤트를 한 곳에서 서명 검증한다.
+   *
+   * 핸들러마다 검증을 넣으면 언젠가 빠뜨리는 핸들러가 생기고, 공격자는 정확히
+   * 그 하나만 찾으면 된다. socket.io의 소켓 단위 미들웨어는 그 소켓의 모든 수신
+   * 패킷이 반드시 지나는 지점이라, 새 @SubscribeMessage가 추가돼도 자동으로 덮인다.
+   *
+   * 검증에 실패한 패킷은 next()를 부르지 않고 그대로 버린다. 에러로 넘기면
+   * socket.io가 클라이언트에 error 이벤트를 돌려주는데, 위조 패킷을 보낸 쪽에
+   * "무엇이 틀렸는지"를 알려줄 이유가 없다.
+   *
+   * 소켓을 끊지 않고 패킷만 버리는 이유는, 정상 Agent가 시계 밀림(EXPIRED)으로
+   * 일시적으로 걸릴 수 있기 때문이다. 그때 연결을 끊으면 재연결 폭풍이 된다.
+   * 신원 자체가 의심스러운 경우는 register에서 이미 끊었다.
+   */
+  private guardIncomingPackets(client: Socket) {
+    // 같은 소켓에서 register가 두 번 오면 미들웨어가 중복 설치된다.
+    if (client.data.packetGuardInstalled) return;
+    client.data.packetGuardInstalled = true;
+
+    client.use(([event, payload], next) => {
+      if (UNVERIFIED_EVENTS.has(event)) return next();
+
+      /**
+       * 이 미들웨어는 register를 통과한 소켓에만 붙고, 그 시점에 비밀은 반드시 존재한다.
+       * (registerAgent가 신규 발급하거나, 없으면 재발급한 뒤에야 여기까지 온다)
+       * 그러므로 비밀이 비어 있다는 것은 등록 경로가 깨졌다는 뜻이고, 통과시킬 이유가 없다.
+       */
+      const secret = client.data.signingSecret as string | null | undefined;
+      if (!secret) {
+        log(`[Agent Gateway] {{ red : bold : SIGNATURE:NO_SECRET }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  The socket passed registration without a signing secret.`, 500, 'ERROR');
+        return;
+      }
+
+      const verification = verify(event, payload, secret, { replayGuard: client.data.replayGuard as ReplayGuard });
+      if (verification.ok) return next();
+
+      log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  reason: ${verification.reason}`, 401, 'ERROR');
+    });
+  }
+
+  /**
+   * Agent로 나가는 유일한 발신 통로. 페이로드에 서명을 붙인다.
+   *
+   * Agent도 Hub와 같은 이유로 이 서명을 요구한다. Agent 입장에서 `command`는
+   * "이 코드를 받아 실행하라"는 지시이므로, 보낸 쪽이 정말 Hub인지 확인할 수단이
+   * 없으면 소켓을 가로챈 쪽이 그대로 원격 실행 권한을 얻는다.
+   *
+   * 비밀은 소켓에 붙여둔 값을 쓴다. 방을 거치지 않고 소켓 객체를 직접 꺼내는 이유는
+   * `server.to(socketId)`로는 그 소켓의 data에 접근할 수 없기 때문이다.
+   */
   sendToAgent(agentUuid: string, event: string, payload: unknown): boolean {
-    const socketId = this.agentUuidToSocketId.get(agentUuid);
-    if (!socketId) return false;
-    this.server.to(socketId).emit(event, payload);
+    const socket = this.getAgentSocket(agentUuid);
+    if (!socket) return false;
+
+    const secret = socket.data.signingSecret as string | null | undefined;
+    if (!secret) {
+      log(`[Agent Gateway] {{ red : bold : SIGNATURE:NO_SECRET }}\n  event: ${event}\n  agent: ${agentUuid}\n  Outbound event was dropped: the socket has no signing secret.`, 500, 'ERROR');
+      return false;
+    }
+
+    socket.emit(event, sign(event, payload, secret));
     return true;
   }
 
-  disconnectAgent(agentUuid: string): boolean {
+  /** 등록된 Agent의 소켓 객체를 찾는다. 없으면 null. */
+  private getAgentSocket(agentUuid: string): Socket | null {
     const socketId = this.agentUuidToSocketId.get(agentUuid);
-    if (!socketId) return false;
+    if (!socketId) return null;
+    return this.server.sockets.sockets.get(socketId) ?? null;
+  }
 
-    const socket = this.server.sockets.sockets.get(socketId);
-    socket?.emit('command', { command: 'DISCONNECT' });
-    setTimeout(() => socket?.disconnect(true), 250);
+  disconnectAgent(agentUuid: string): boolean {
+    const socket = this.getAgentSocket(agentUuid);
+    if (!socket) return false;
+
+    /**
+     * DISCONNECT도 sendToAgent를 거친다.
+     *
+     * 예전에는 여기서 소켓에 직접 emit했는데, Agent가 서명을 요구하기 시작하면
+     * 그 미서명 명령만 조용히 무시되어 "끊기 명령을 보냈는데 안 끊긴다"가 된다.
+     */
+    this.sendToAgent(agentUuid, 'command', { command: 'DISCONNECT' });
+    setTimeout(() => socket.disconnect(true), 250);
     this.agentUuidToSocketId.delete(agentUuid);
     this.clearOfflineTimer(agentUuid);
     return true;
