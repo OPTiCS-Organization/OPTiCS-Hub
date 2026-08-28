@@ -7,9 +7,24 @@ import { AgentUpdateService } from './agent-update.service';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
 import { ServiceComponentStatus } from '@prisma/client';
+import { ReplayGuard, verify } from 'src/global/hash.util';
+import { PROTOCOL_RESULT_CODE } from './types/ResultCode.type';
 
 const MINIMUM_PROTOCOL_VERSION = 1;
 const MAXIMUM_PROTOCOL_VERSION = 1;
+
+/**
+ * 서명 검증을 실제로 강제할지 여부.
+ *
+ * 기본값이 false인 이유는 전환 순서 때문이다. 배포된 Agent 중에는 프로토콜 v1이면서
+ * 아직 서명을 붙이지 않는 버전(0.6.0 이전 빌드)이 남아 있고, 켠 채로 배포하면 그것들이
+ * 한꺼번에 끊긴다. 먼저 false로 올려 SIGNATURE:REJECTED 로그가 0이 되는지 확인하고,
+ * 그다음 true로 올린다.
+ */
+const SIGNATURE_ENFORCED = process.env.AGENT_SIGNATURE_ENFORCED === 'true';
+
+/** 서명 검증을 건너뛰는 이벤트. register는 소켓에 비밀이 붙기 전이라 따로 검증한다. */
+const UNVERIFIED_EVENTS = new Set(['register']);
 
 type ServiceLogPayload = {
   serviceIndex: number;
@@ -332,6 +347,30 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     log(`[Agent Gateway] Validating agent: ${payload.agentUuid}`, 200, 'INFO')
+
+    /**
+     * 자신이 기존 Agent라고 주장하면 그 주장을 서명으로 증명하게 한다.
+     *
+     * UUID는 페이로드에 실려 오는 값이라 그것만 보고 등록하면, UUID를 아는 누구든
+     * 남의 Agent로 접속해 그 워크스페이스의 명령을 대신 받을 수 있다.
+     * 비밀이 아직 없는 Agent는 증명할 수단이 없으므로 통과시키고, registerAgent가
+     * 이번 등록에서 비밀을 발급해 다음 접속부터 증명할 수 있게 만든다.
+     */
+    if (payload.agentUuid) {
+      const knownSecret = await this.agentService.getSigningSecret(payload.agentUuid);
+      if (knownSecret) {
+        const verification = verify('register', payload, knownSecret);
+        if (!verification.ok) {
+          log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: register\n  agent: ${payload.agentUuid}\n  reason: ${verification.reason}\n  enforced: ${SIGNATURE_ENFORCED}`, 401, 'ERROR');
+          if (SIGNATURE_ENFORCED) {
+            client.emit('register', { code: PROTOCOL_RESULT_CODE.INVALID_SIGNATURE, data: { reason: verification.reason } });
+            client.disconnect(true);
+            return;
+          }
+        }
+      }
+    }
+
     const rawIp = (client.handshake.headers['x-forwarded-for'] as string) ?? client.handshake.address;
     const ip = rawIp === '::1' ? '127.0.0.1' : rawIp.replace(/^::ffff:/, '');
 
@@ -343,10 +382,21 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.agentUuidToSocketId.set(agent.uuid, client.id);
     client.data.agentCode = agent.code;
     client.data.agentUuid = agent.uuid;
-    client.data.signingSecret = agent.signingSecret;
     client.data.agentIp = agent.ip;
     client.data.workspaceIndex = agent.parentWorkspace;
-    client.emit('register', { code: 'ok', data: agent });
+
+    /**
+     * 이후 이벤트를 검증할 비밀을 소켓에 붙인다.
+     *
+     * `agent.signingSecret`을 그대로 쓰면 안 된다. 그건 "이번에 발급해서 보내줄 값"이라
+     * 이미 비밀을 가진 Agent에게는 null이고, 그러면 그 소켓의 모든 이벤트가
+     * 검증 불가가 된다. 유효한 비밀을 다시 읽어와 붙인다.
+     */
+    client.data.signingSecret = agent.signingSecret ?? await this.agentService.getSigningSecret(agent.uuid);
+    client.data.replayGuard = new ReplayGuard();
+    this.guardIncomingPackets(client);
+
+    client.emit('register', { code: PROTOCOL_RESULT_CODE.OK, data: agent });
     log(`[Agent Gateway] Registration information sent.`);
     // 업데이트 직후의 재접속이라면 보고된 버전으로 성공/롤백을 판정한다.
     await this.agentUpdateService.handleReconnect(agent.uuid, payload.agentVersion ?? null);
@@ -365,6 +415,41 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (await this.agentUpdateService.isExpectedRestart(agentUuid)) return;
       this.scheduleOffline(agentUuid);
     }
+  }
+
+  /**
+   * 등록된 소켓으로 들어오는 모든 이벤트를 한 곳에서 서명 검증한다.
+   *
+   * 핸들러마다 검증을 넣으면 언젠가 빠뜨리는 핸들러가 생기고, 공격자는 정확히
+   * 그 하나만 찾으면 된다. socket.io의 소켓 단위 미들웨어는 그 소켓의 모든 수신
+   * 패킷이 반드시 지나는 지점이라, 새 @SubscribeMessage가 추가돼도 자동으로 덮인다.
+   *
+   * 검증에 실패한 패킷은 next()를 부르지 않고 그대로 버린다. 에러로 넘기면
+   * socket.io가 클라이언트에 error 이벤트를 돌려주는데, 위조 패킷을 보낸 쪽에
+   * "무엇이 틀렸는지"를 알려줄 이유가 없다.
+   */
+  private guardIncomingPackets(client: Socket) {
+    // 같은 소켓에서 register가 두 번 오면 미들웨어가 중복 설치된다.
+    if (client.data.packetGuardInstalled) return;
+    client.data.packetGuardInstalled = true;
+
+    client.use(([event, payload], next) => {
+      if (UNVERIFIED_EVENTS.has(event)) return next();
+
+      /**
+       * 비밀이 없는 Agent는 검증할 근거 자체가 없으므로 통과시킨다.
+       * 이 상태는 다음 register에서 비밀이 발급되며 자연히 해소된다.
+       */
+      const secret = client.data.signingSecret as string | null | undefined;
+      if (!secret) return next();
+
+      const verification = verify(event, payload, secret, { replayGuard: client.data.replayGuard as ReplayGuard });
+      if (verification.ok) return next();
+
+      log(`[Agent Gateway] {{ red : bold : SIGNATURE:REJECTED }}\n  event: ${event}\n  agent: ${client.data.agentUuid ?? '-'}\n  reason: ${verification.reason}\n  enforced: ${SIGNATURE_ENFORCED}`, 401, 'ERROR');
+      if (SIGNATURE_ENFORCED) return;
+      return next();
+    });
   }
 
   sendToAgent(agentUuid: string, event: string, payload: unknown): boolean {

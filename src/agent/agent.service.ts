@@ -99,6 +99,16 @@ export class AgentService implements OnModuleInit {
       });
 
       if (exist) { // 일치하는 UUID를 찾으면
+        /**
+         * 서명 비밀이 비어 있다면 HMAC 도입 이전에 등록된 Agent다. 이번 등록에서 발급해 준다.
+         *
+         * 이 경로가 없으면 기존 Agent는 영영 비밀을 갖지 못하고, Hub가 서명 검증을
+         * 강제하는 순간 전부 접속 불가가 된다. 이미 있는 비밀은 절대 덮어쓰지 않는다.
+         * 재발급은 곧 그 Agent의 신원 교체이고, 경합하는 두 소켓이 서로의 비밀을
+         * 무효화하는 상황을 만든다.
+         */
+        const reissuedSecret = exist.agent_signing_secret ? null : crypto.randomBytes(32).toString('hex');
+
         const updatedAgent = await this.prismaService.agents.update({
           where: {
             agent_uuid: agent.uuid
@@ -109,6 +119,7 @@ export class AgentService implements OnModuleInit {
             agent_last_online: new Date(),
             agent_protocol_version: protocolVersion,
             agent_version: agentVersion,
+            ...(reissuedSecret ? { agent_signing_secret: reissuedSecret } : {}),
           },
         });
         agent.code = updatedAgent.agent_code;
@@ -116,10 +127,11 @@ export class AgentService implements OnModuleInit {
         agent.parentWorkspace = updatedAgent.agent_parent_workspace;
 
         return {
+          // 이미 비밀을 가진 Agent에게는 null을 보낸다. Agent는 null이면 저장본을 유지한다.
+          signingSecret: reissuedSecret,
           ip: agent.ip,
           code: agent.code,
           uuid: agent.uuid,
-          signingSecret: null,
           parentWorkspace: agent.parentWorkspace,
         };
       }
@@ -147,6 +159,20 @@ export class AgentService implements OnModuleInit {
       signingSecret: newAgent.agent_signing_secret,
       parentWorkspace: newAgent.agent_parent_workspace,
     }
+  }
+
+  /**
+   * Agent의 HMAC 서명 비밀을 조회한다. 아직 발급되지 않았으면 null.
+   *
+   * register는 소켓에 비밀을 붙이기 전에 도착하므로, 그 한 건만 DB에서 직접 읽어
+   * 검증해야 한다. 등록 이후의 이벤트는 client.data에 붙여둔 값을 쓴다.
+   */
+  public async getSigningSecret(agentUuid: string): Promise<string | null> {
+    const agent = await this.prismaService.agents.findFirst({
+      where: { agent_uuid: agentUuid },
+      select: { agent_signing_secret: true },
+    });
+    return agent?.agent_signing_secret ?? null;
   }
 
   async getAgentList(userIndex: number, workspaceIdx: number) {
