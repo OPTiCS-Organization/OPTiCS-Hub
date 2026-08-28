@@ -1,6 +1,6 @@
 {
   "name": "optics-server",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "",
   "author": "",
   "private": true,
@@ -91,6 +91,9 @@
       "**/*.(t|j)s"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "modulePaths": [
+      "<rootDir>/.."
+    ]
   }
 }

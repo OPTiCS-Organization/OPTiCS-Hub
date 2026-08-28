@@ -23,6 +23,14 @@ const DEFAULT_TOKEN_TTL: Partial<Record<TokenPurpose, TokenTtl>> = {
   [TokenPurpose.TERMINAL_SSH]: '2m',
   [TokenPurpose.VERIFY_REGISTER_TOTP]: '5m',
 };
+
+/**
+ * 회전된 직후의 Refresh Token을 계속 받아주는 시간.
+ *
+ * 동시 요청 경쟁을 흡수하기 위한 창이라 "네트워크 왕복 몇 번" 정도면 충분하다.
+ * 길게 잡을수록 탈취된 구토큰의 재사용 여지가 그만큼 늘어난다.
+ */
+const REFRESH_ROTATION_GRACE_MS = 10_000;
 @Injectable()
 export class JwtUtil {
   constructor(
@@ -31,32 +39,58 @@ export class JwtUtil {
     private readonly prismaService: PrismaService,
   ) { };
 
-  /** 저장된 Refresh Token을 폐기하고 새로운 로그인 토큰 쌍을 발급한다. */
-  async refresh(token: string) {
-    const userIndex = this.jwtService.decode(token).userIndex;
+  /**
+   * 저장된 Refresh Token을 폐기하고 새로운 로그인 토큰 쌍을 발급한다.
+   *
+   * 토큰이 없거나 알아볼 수 없으면 예외를 던지지 않고 null 쌍을 돌려준다.
+   * 이 메서드는 예외 필터(TokenRefreshFilter) 안에서 호출되므로, 여기서 던지면
+   * 필터가 처리할 수 없어 401 대신 500이 나가고 클라이언트는 로그인 화면으로도 못 간다.
+   */
+  async refresh(token: string | undefined) {
+    if (!token) return { accessToken: null, refreshToken: null };
 
-    const exist = await this.prismaService.refresh_token.findFirstOrThrow({
+    const userIndex: number | undefined = this.jwtService.decode(token)?.userIndex;
+    if (userIndex === undefined) return { accessToken: null, refreshToken: null };
+
+    const active = await this.prismaService.refresh_token.findFirst({
       where: {
         token_owner: userIndex,
         token: token,
         token_expired_at: null,
       }
-    }).catch(() => {
-      return null;
-    })
-
-    if (!exist) return { accessToken: null, refreshToken: null };
-
-    await this.prismaService.refresh_token.update({
-      where: {
-        token_index: exist.token_index
-      },
-      data: {
-        token_expired_at: new Date
-      }
     });
 
-    return this.signLoginTokens(userIndex);
+    if (active) {
+      await this.prismaService.refresh_token.update({
+        where: { token_index: active.token_index },
+        data: { token_expired_at: new Date() },
+      });
+      return this.signLoginTokens(userIndex);
+    }
+
+    /**
+     * 방금 회전된 토큰이면 같은 갱신 시도로 보고 받아준다.
+     *
+     * 액세스 토큰이 만료된 순간 페이지가 요청을 여러 개 동시에 던지면, 그 요청들이
+     * 각자 이 메서드에 들어온다. 먼저 도착한 하나가 토큰을 만료 처리하는 순간
+     * 나머지는 전부 "없는 토큰"이 되어 로그아웃당한다. 실제로 앱 부팅 시
+     * /v1/auth/me 와 /v1/workspace 가 나란히 나가므로 흔하게 재현된다.
+     *
+     * 유예 창을 두면 그 경쟁이 사라진다. 창이 짧아 탈취한 구토큰을 재사용할 여지는
+     * 거의 없고, 회전 자체(쓰고 나면 버린다)는 그대로 유지된다.
+     */
+    const recentlyRotated = await this.prismaService.refresh_token.findFirst({
+      where: {
+        token_owner: userIndex,
+        token: token,
+        token_expired_at: { gte: new Date(Date.now() - REFRESH_ROTATION_GRACE_MS) },
+      },
+      orderBy: { token_expired_at: 'desc' },
+    });
+
+    if (recentlyRotated) return this.signLoginTokens(userIndex);
+
+    return { accessToken: null, refreshToken: null };
   }
 
   /**
