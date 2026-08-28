@@ -1,217 +1,195 @@
 # 소켓 통신 계약
 
-## Protocol Version 0
+## Protocol Version 1
 
-**v0은 "프로토콜 협상이 존재하지 않던 시절의 계약"이다.**
-`register`에 `protocol` 필드를 담지 않는 Agent는 모두 v0으로 간주한다.
+**v1은 "협상과 신원 증명이 생긴 계약"이다.**
 
-이 문서는 Agent `0.5.3` / Hub `0.5.3` 시점에 **배포되어 동작 중인** 표면을 있는 그대로
-받아적어 동결한 것입니다. 설계했어야 할 모습이 아니라 현재 모습이며, 적절하지 않은 부분도 그대로 둡니다.
-v0의 정의는 협상의 기준점이므로 **이 문서는 앞으로 수정하지 않는다.** 변경은 v1 문서에서 다룹니다.
+v0([protocol_v0.md](./protocol_v0.md))에서 달라진 것만 적습니다. 여기서 언급하지 않은
+이벤트·페이로드는 v0 문서가 그대로 유효합니다.
 
-### 버전을 올리는 기준
-| 변경                                 | bump |
-| ------------------------------------ | ---- |
-| 새 이벤트 추가                       | NO   |
-| 기존 페이로드에 optional 필드 추가   | NO   |
-| 이벤트 제거 / 개명                   | YES  |
-| optional → required 승격, 타입 변경  | YES  |
-| 이벤트 이름은 그대로인데 의미가 바뀜 | YES  |
+Hub는 `MINIMUM_PROTOCOL_VERSION`~`MAXIMUM_PROTOCOL_VERSION` 범위 밖의 Agent를 거부하며,
+현재 두 값 모두 `1`입니다. 즉 **v0 Agent는 더 이상 접속하지 못합니다.**
 
-> 판단 기준 : **구버전 Agent가 새 Hub에 붙었을 때 아무 일도 일어나지 않으면 bump가 아니다.**
-따라서 새로 추가하는 이벤트·필드는 항상 optional로 설계하고, 구버전이 무응답이어도
-Hub가 정상 동작해야 한다.
+| 구현 | 위치 |
+| ---- | ---- |
+| 버전 상수 (Agent) | `OPTiCS-Agent/src/global/protocol.ts` — `package.json`의 `optics.protocol`과 일치해야 하며 `protocol.spec.ts`가 강제한다 |
+| 버전 게이트 (Hub) | `OPTiCS-Hub/src/agent/agent.gateway.ts` |
+| 서명 유틸 | `OPTiCS-Agent/src/utility/hash.util.ts` = `OPTiCS-Hub/src/global/hash.util.ts` (바이트 단위로 동일) |
+| 서명 부착 (Agent) | `createSocketEmitter.util.ts` |
+| 서명 검증 (Agent) | `createSocketListener.util.ts` |
+| 서명 부착·검증 (Hub) | `agent.gateway.ts`의 `sendToAgent` / `guardIncomingPackets` |
 
 ---
 
-## 1. 전송 계층
+## 1. v0에서 달라진 것
 
-| 항목           | 값                                                                               |
-| -------------- | -------------------------------------------------------------------------------- |
-| 라이브러리     | socket.io                                                                        |
-| Namespace      | `/agent`                                                                         |
-| 방향           | Agent가 Hub로 접속 (Agent = client, Hub = server)                                |
-| 재연결         | `reconnection: true`, `reconnectionDelay: 3000`                                  |
-| handshake auth | `{ agentUuid: string \| null }`                                                  |
-| Agent 식별     | 접속 후 `register` 이벤트로 확정. handshake auth의 uuid는 disconnect 처리용 폴백 |
-
-Hub는 연결 수락 시점엔 아무것도 하지 않고, Agent가 `register` 이벤트를 Emit 할 때 까지 대기함.
-
----
-
-## 2. 공통 타입
+### 1.1 `register` 요청에 필드가 추가되었다
 
 ```ts
-type ServiceLogEntry = {
-  line: string;
-  timestamp?: string;                              // ISO 8601
-  source?: 'hub' | 'agent' | 'runtime';
-  stream?: 'deploy' | 'lifecycle' | 'runtime';
-  containerName?: string;
-  composeService?: string;
-  stderr?: boolean;
-};
-
-type SessionMarker = {
-  serviceIndex: number;
-  serviceName: string;
-  containerName: string;
-  event: string;                                   // 예: 'service-deploy'
-  timestamp: string;
-};
-
-type ContainerState = {
-  name: string;
-  status: string;                                  // ServiceStatus, 아래 §2.1
-  service?: string;                                // compose service 이름
-  exitCode?: number | null;
-  health?: string | null;
-};
-
-type ServicePortMapping = { hostPort: number; containerPort: number };
-type SourceRepository   = { url: string; rootDirectory?: string | null };
-```
-
-### 2.1 열거형
-
-```ts
-enum COMMAND {
-  DEPLOY, REDEPLOY, ABORT, START, STOP,
-  CONTAINER_START, CONTAINER_STOP, CONTAINER_RESTART,
-  DELETE, DISCONNECT,
-  STREAM_LOG, LOAD_OLDER_LOG, STOP_LOG, SYNC_CONTAINER_STATUS,
+// Agent → Hub
+{
+  agentUuid: string | null;
+  agentVersion: string | null;
+  protocolVersion: number;    // v1에서 추가. 없으면 Hub가 v0으로 간주해 거부한다
+  _sig?: string;              // 서명 봉투. §2 참조
+  _ts?: number;
+  _nonce?: string;
 }
-
-enum DEPLOY_OPTION { DOCKERFILE, COMPOSE, PRESET_NEST }
 ```
 
-서비스 상태 문자열: `waiting` `building` `starting` `running` `stopped` `failed` `removed` `restarting`
+### 1.2 `register` 응답이 결과 코드 봉투를 갖는다
 
-> Hub는 `service-status` 수신 시 `restarting`을 제외한 7개만 DB에 반영하고, 나머지는 Console로만 중계한다.
-> `container-status`의 컴포넌트 상태는 8개 전부 허용하며, 목록에 없는 값은 `stopped`로 정규화된다.
+v0에서는 성공 응답만 존재했고 거절 경로가 없었습니다(v0 문서 §5-1). v1의 응답은 항상
+`{ code, data }` 형태입니다.
 
----
+| `code` | `data` | Agent의 처리 |
+| ------ | ------ | ------------ |
+| `ok` | `Agent` (§1.3) | uuid·code·ip·signingSecret을 로컬 DB에 저장 |
+| `deprecated_protocol_version` | `{ minimum, maximum }` | 재연결 중단. **Agent를 올려야 한다** |
+| `unknown_protocol_version` | `{ minimum, maximum }` | 재연결 중단. **Hub를 올려야 한다** |
+| `invalid_signature` | `{ reason }` | 재연결 중단. 저장된 비밀이 Hub의 것과 다르다 |
+| `registration_failed` | `{ reason }` | 로그만 남기고 재연결은 계속한다 |
 
-## 3. Events | Agent → Hub
+거절 코드는 `OPTiCS-Hub/src/agent/types/ResultCode.type.ts`가 유일한 정의이며,
+Agent 쪽 수신 타입은 `src/interfaces/register-payload.interface.ts`입니다.
 
-| Event                 | Payload                                                                                                            | Description                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| `register`            | `{ agentUuid: string \| null, agentVersion?: string \| null }`                                                     | 접속 직후 자신을 등록. `agentVersion`은 Agent의 `package.json` 버전이며 읽기 실패 시 `null` |
-| `response`            | `unknown`                                                                                                          | 명령 처리 결과. Hub는 해석하지 않고 Console로 그대로 중계                                   |
-| `system-metrics`      | `{ requestId: string, metrics: unknown }`                                                                          | `system-metrics-request`에 대한 응답                                                        |
-| `terminal-ready`      | `{ sessionId: string }`                                                                                            | SSH 세션 수립 완료                                                                          |
-| `terminal-output`     | `{ sessionId: string, data: string }`                                                                              | 터미널 출력                                                                                 |
-| `terminal-closed`     | `{ sessionId: string, reason?: string }`                                                                           | 터미널 세션 종료                                                                            |
-| `container-status`    | `{ serviceIndex: number, containers: ContainerState[], counts?: { running: number, total: number } }`              | 컨테이너 상태 스냅샷. Hub는 이걸로 `service_components`를 동기화                            |
-| `service-status`      | `{ serviceIndex: number, status: string }`                                                                         | 서비스 단위 상태 전이                                                                       |
-| `service-log`         | `{ serviceIndex: number, log: string, timestamp?, source?, stream?, containerName?, composeService?, stderr? }`    | 실시간 로그 1줄                                                                             |
-| `log-load-progress`   | `{ serviceIndex: number, loaded: number, total: number, percent: number, phase: string }`                          | 과거 로그 적재 진행률                                                                       |
-| `service-log-history` | `{ serviceIndex: number, logs: ServiceLogEntry[], markers?: SessionMarker[], before?: string, hasMore?: boolean }` | 과거 로그 묶음                                                                              |
-| `service-log-markers` | `{ serviceIndex: number, markers: SessionMarker[] }`                                                               | 세션 구분 마커                                                                              |
+재연결을 멈추는 세 경우는 모두 **재시도로 풀리지 않는 상태**입니다. 3초 간격으로 계속
+두들겨봐야 로그만 채우고 Hub에도 부담이 되므로 사람의 개입을 기다립니다.
 
-### 중계 규칙
-
-`register`를 제외한 모든 이벤트는 Hub가 **Console로 중계**하며, 그 과정에서 `agentCode`가 주입된다.
-
-- `response`, `system-metrics`, `terminal-*` → Agent 소유자에게 직접 전달 (`agentCode` 주입 없음)
-- 그 외 → 해당 워크스페이스로 브로드캐스트, 페이로드는 `{ agentCode, ...payload }`
-
-`serviceIndex`를 가진 이벤트는 Hub가 **"그 서비스가 정말 이 Agent 소유인가"를 매번 검증**하고,
-아니면 버린다. 즉 Agent는 자신에게 배정되지 않은 `serviceIndex`로 아무것도 할 수 없다.
-
----
-
-## 4. Events | Hub → Agent
-
-| Event                    | Payload                                                                                                                              | Description                                                    |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
-| `register`               | `{ agentCode: string, agentUuid: string, agentIp: string, agentParentWorkspace: number \| null }`                                    | 등록 응답(ack). Agent는 code/uuid/ip를 로컬 DB에 저장          |
-| `command`                | `Command` (아래)                                                                                                                     | 서비스 명령 일체                                               |
-| `system-metrics-request` | `{ requestId: string }`                                                                                                              | 시스템 메트릭 요청                                             |
-| `terminal-open`          | `{ sessionId: string, cols: number, rows: number }`                                                                                  | SSH 터미널 세션 시작                                           |
-| `terminal-input`         | `{ sessionId: string, data: string }`                                                                                                | 터미널 입력. Agent는 64KB 초과 시 폐기                         |
-| `terminal-resize`        | `{ sessionId: string, cols: number, rows: number }`                                                                                  | 터미널 크기 변경                                               |
-| `terminal-close`         | `{ sessionId: string }`                                                                                                              | 터미널 세션 종료                                               |
-| `connect-request`        | `{ workspaceOwnerName: string, workspaceName: string, workspaceCreatedAt: string, workspaceIndex: number, requestDatetime: string }` | 워크스페이스 연결 요청. Agent Dashboard에서 사용자가 수락/거절 |
-| `tunnel-connect`         | `{ token: string, service_port: number, tunnel_port: number }`                                                                       | 일회성 Reverse Tunnel 연결 요청                                |
-
-### 4.1 `command` 페이로드
+### 1.3 `register` 응답의 `data`
 
 ```ts
-type Command = {
-  command: COMMAND;
-  targetService: string;
-  deployPreset: DEPLOY_OPTION;
-
-  serviceIndex: number;
-  serviceName: string;
-  serviceVersion: string;
-  sourceUrl: string | string[] | SourceRepository[];
-  rootDirectory?: string | null;
-
-  servicePort: number;
-  serviceHostPort?: number;
-  serviceContainerPort?: number;
-  servicePortMappings?: ServicePortMapping[];
-
-  containerName?: string;                          // CONTAINER_* 계열
-  before?: string;                                 // LOAD_OLDER_LOG 커서
-  limit?: number;                                  // LOAD_OLDER_LOG, 기본 1000
-  deleteScope?: 'containers' | 'service';          // DELETE
-
-  env: Record<string, string>;
+type Agent = {
+  code: string;                  // 사용자에게 보여주는 Agent 코드
+  uuid: string;
+  ip: string;
+  parentWorkspace: number | null;
+  signingSecret: string | null;  // §3 참조. 신규 발급 시에만 값이 실린다
 };
 ```
 
-모든 필드가 한 타입에 평평하게 모여 있고, 실제로는 `command` 값에 따라 일부만 채워진다.
-예를 들어 `STOP_LOG`는 `serviceName`만, `DEPLOY`는 대부분을 사용한다.
-**v0에서는 이 부분집합 관계가 타입으로 표현되지 않는다.**
-
-### 4.2 명령별 응답
-
-Agent는 `command` 처리 후 항상 `response`를 1회 emit한다.
-단 대부분의 분기는 `response = {}`로 남으므로, 사실상 **완료 신호에 가깝고 결과 데이터가 아니다.**
-실제 결과는 `service-status` / `service-log` / `container-status`로 따로 흐른다.
-
-`DISCONNECT`는 예외적으로 Agent가 소켓을 스스로 끊는다.
+> v0 문서 §5-2에 적힌 "ack 타입이 양쪽에서 다르다"는 문제는 v1에서 해소되었습니다.
 
 ---
 
-## 5. v0의 알려진 문제
+## 2. 서명 봉투
 
-동결 대상이므로 **고치지 않고 기록만 한다.** v1 설계 시 입력으로 쓴다.
+`register`를 제외한 **모든 이벤트**는 양방향 모두 서명을 싣습니다.
 
-1. **`register`에 거절 경로가 없다.** Hub는 어떤 Agent든 무조건 등록하고 ack을 보낸다.
-   버전이 맞지 않아도 거부할 수단이 없으며, Agent 쪽에도 "등록 실패" 상태가 존재하지 않는다.
-   → 프로토콜 협상 도입 시 가장 먼저 생겨야 할 상태.
+```ts
+{
+  ...페이로드,
+  _ts: number;      // 서명 시각 (epoch ms)
+  _nonce: string;   // 16바이트 랜덤의 hex
+  _sig: string;     // HMAC-SHA256 다이제스트의 소문자 hex
+}
+```
 
-2. **`register` ack의 타입이 양쪽에서 다르다.** Hub는 `agentParentWorkspace`를 포함해 4개 필드를 보내지만,
-   Agent의 수신 타입은 3개만 선언하고 있어 이 필드는 버려진다.
+### 2.1 서명 대상 문자열
 
-3. **`response`가 사실상 타입이 없다.** Hub는 `unknown`으로 받아 Console에 그대로 넘긴다.
-   어떤 명령의 응답인지 식별할 상관 ID도 없다.
+```
+v{SIGNATURE_SCHEME_VERSION}\n{event}\n{_ts}\n{_nonce}\n{정규화된 페이로드}
+```
 
-4. **날짜 타입이 섞여 있다.** `connect-request`에서 Hub는 `Date` 객체를 넘기지만
-   Agent의 선언 타입은 `string`이다. socket.io의 JSON 직렬화 덕에 우연히 동작한다.
+예:
 
-5. **`tunnel-connect`만 snake_case다.** 나머지 전 이벤트는 camelCase.
-   또한 `tunnel_port: 5220`이 Hub에 하드코딩되어 있다.
+```
+v1
+service-status
+1756000000000
+fixednonce
+{"nested":{"a":null,"z":[3,1,2]},"serviceIndex":7,"status":"running"}
+```
 
-6. **`Command`가 명령별로 분리되어 있지 않다.** §4.1 참고.
+- **`SIGNATURE_SCHEME_VERSION`은 프로토콜 버전과 별개다.** 서명 규칙만 바뀔 때 올린다.
+  맨 앞에 박혀 있으므로 구버전 서명이 새 규칙으로 우연히 통과할 수 없다.
+- **이벤트 이름이 들어간다.** 빠지면 `service-status`용 유효 서명을 그대로 `command`에
+  옮겨 붙일 수 있다.
+- **개행으로 잇는다.** 각 조각은 개행을 품을 수 없다 — 이벤트 이름과 nonce는 우리가 만드는
+  값이고, 정규화 JSON은 실제 개행을 `\n`으로 이스케이프한다.
+
+### 2.2 페이로드 정규화
+
+`JSON.stringify`는 키 순서를 입력 순서 그대로 두므로, 양쪽의 조립 코드가 다르면 같은 내용이라도
+다른 문자열이 나옵니다. 그래서 아래 규칙으로 결정적 직렬화를 합니다.
+
+| 대상 | 규칙 |
+| ---- | ---- |
+| 객체 키 | 코드 유닛 오름차순으로 **재귀 정렬** (`Array#sort` 기본값) |
+| 배열 | 순서가 의미이므로 **보존** |
+| 객체의 `undefined` 값 | 키째로 제거 (`JSON.stringify`와 동일) |
+| 배열 원소의 `undefined` | `null` (`JSON.stringify`와 동일) |
+| `toJSON`을 가진 값 (`Date` 등) | `toJSON`을 먼저 적용 |
+| `NaN` · `Infinity` | `null` (`JSON.stringify`와 동일) |
+| `_sig` · `_ts` · `_nonce` | 서명 대상에서 **제외** (자기 자신을 서명할 수 없다) |
+| 순환 참조 | `TypeError`를 던진다 |
+
+### 2.3 검증
+
+받은 쪽은 이 순서로 확인합니다. **순서가 계약의 일부입니다.**
+
+1. `_sig`·`_ts`·`_nonce`의 존재와 형식
+2. 다이제스트 재계산 후 **상수 시간 비교**
+3. `_ts`가 허용 시계 오차(기본 5분) 안인지
+4. `_nonce`가 처음 보는 값인지
+
+서명 대조가 nonce 기록보다 **먼저**여야 합니다. 반대로 하면 공격자가 서명이 틀린 페이로드로
+남의 nonce를 미리 태워 정상 요청을 재전송으로 오판하게 만들 수 있습니다.
+
+### 2.4 검증 실패 시의 동작
+
+| 상황 | 동작 |
+| ---- | ---- |
+| `register`의 서명 불일치 (Hub) | `invalid_signature` 응답 후 즉시 연결 종료 |
+| 그 밖의 이벤트 (양방향) | **그 패킷만 폐기.** 연결은 유지한다 |
+
+패킷만 버리는 이유는 정상 Agent도 시계 밀림으로 일시적으로 걸릴 수 있기 때문입니다.
+그때 연결을 끊으면 3초 간격 재연결 폭풍이 됩니다. 신원 자체가 의심스러운 경우는 register에서
+이미 걸러집니다.
+
+실패를 보낸 쪽에 알리지 않습니다. 위조 패킷을 보낸 쪽에 무엇이 틀렸는지 알려줄 이유가 없습니다.
 
 ---
 
-## 6. 계약에 포함되지 않는 것
+## 3. 서명 비밀의 수명
 
-아래는 Agent에 리스너가 존재하지만 **Hub에 발신부가 없어 한 번도 동작한 적이 없다.**
-v0 계약에 포함하지 않으며, 하위호환 대상도 아니다. 구현 시점에 새로 설계한다.
+| 시점 | 동작 |
+| ---- | ---- |
+| 신규 Agent 등록 | Hub가 32바이트를 발급하고 `register` 응답에 실어 보낸다 |
+| 기존 Agent 재등록 | 응답의 `signingSecret`은 `null`. Agent는 저장본을 유지한다 |
+| 비밀이 없는 기존 Agent | Hub가 이번 등록에서 발급한다 (HMAC 도입 이전에 등록된 Agent) |
 
-| Event           | 현재 상태                                                                      |
-| --------------- | ------------------------------------------------------------------------------ |
-| `reverse-proxy` | Agent 리스너만 존재 (`RouteRequest`를 받아 `response`로 회신). Hub 발신부 없음 |
-| `update-agent`  | Agent 리스너 존재하나 `AppService.updateAgent()`가 빈 스텁. Hub 발신부 없음    |
+**이미 있는 비밀은 절대 덮어쓰지 않습니다.** 재발급은 곧 그 Agent의 신원 교체이고, 경합하는 두
+소켓이 서로의 비밀을 무효화하는 상황을 만듭니다.
 
-또한 다음은 Agent 내부 통신이며 Hub-Agent 계약이 아니다.
+Agent는 비밀을 로컬 DB(`agentInfo` 테이블, 키 `agent-signing-secret`)에 저장하고 로그에는
+남기지 않습니다. 로그를 읽을 수 있는 사람이 곧 그 Agent를 사칭할 수 있는 사람이 됩니다.
 
-- Agent ↔ Agent Dashboard: `info`, `notification`, `service-status` (별도 게이트웨이)
-- Reverse Tunnel의 TCP 와이어 포맷 (`tunnel-connect` 이후의 통신)
+### 3.1 `register`가 서명 대상이 아닌 이유
+
+최초 등록에서 Agent는 아직 비밀이 없고, Hub가 응답에 서명을 붙여봐야 대조할 재료가 없습니다.
+이 부트스트랩 구간은 TLS(Agent가 Hub 인증서를 검증한다)에 기댑니다.
+
+단, **UUID를 가지고 오는 Agent의 `register`는 서명해야 합니다.** UUID는 페이로드에 실려 오는
+값이라 그것만 보고 등록하면 UUID를 아는 누구든 남의 Agent로 접속해 그 워크스페이스의 명령을
+대신 받을 수 있습니다.
+
+---
+
+## 4. v0에서 그대로인 것
+
+- 전송 계층(socket.io, `/agent` 네임스페이스, 재연결 3초)
+- 이벤트 목록과 페이로드 (v0 문서 §3·§4)
+- 중계 규칙 — `serviceIndex`를 가진 이벤트는 Hub가 매번 소유권을 검증한다
+- `Command` 타입이 명령별로 분리되어 있지 않다는 점 (v0 문서 §5-6)
+
+---
+
+## 5. v1의 알려진 문제
+
+1. **`tunnel-connect`만 snake_case다.** v0에서 넘어온 문제로 아직 그대로다.
+2. **`response`에 상관 ID가 없다.** 어떤 명령의 응답인지 식별할 수 없다.
+3. **`hash.util.ts`가 두 저장소에 복제되어 있다.** 파일 지문 테스트로 갈라짐을 막지만,
+   한쪽 저장소만 보고 상수까지 함께 고치면 통과한다. 두 저장소를 함께 체크아웃해 비교하는
+   CI가 있어야 완전히 닫힌다.
+4. **비밀 회전 수단이 없다.** 유출됐을 때 할 수 있는 일은 Agent를 지우고 새로 등록하는 것뿐이다.
