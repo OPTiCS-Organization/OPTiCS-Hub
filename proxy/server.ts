@@ -12,6 +12,7 @@ import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { claimPreconnected } from '../tunnel/preconnect.ts';
 import { register, release } from '../tunnel/registry.ts';
 import { TUNNEL_OUTCOME, isTunnelOutcome, type TunnelOutcome } from '../src/tunnel/tunnel-outcome.ts';
 import { presentationFor, type ErrorTemplateName } from './outcome-presentation.ts';
@@ -137,94 +138,176 @@ const proxyServer = net.createServer((socket) => {
     const host = hostLine.replace(/^host:\s*/i, '').trim();
     buffer = withRequestIdHeader(buffer, idx, requestId);
 
-    register(token, socket, buffer, () => {
-      logDiagnostic('agent_not_responding', requestId, {
+    const onTtfb = () => {
+      if (ttfbRecorded) return;
+      ttfbRecorded = true;
+      logDiagnostic('proxy_response_started', requestId, {
         method,
         host,
-        outcome: TUNNEL_OUTCOME.AGENT_NO_TUNNEL,
+        ttfb_ms: elapsedSince(requestStartedAt),
+      });
+    };
+
+    const askHub = (preferPooled: boolean) => fetch(`${process.env.HUB_API_URL}/v1/tunnel/connect`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-internal-secret": process.env.TUNNEL_INTERNAL_SECRET ?? '',
+        "x-request-id": requestId,
+      },
+      body: JSON.stringify({ serviceSubdomain, workspaceSubdomain, token, preferPooled }),
+    });
+
+    const failWithHubResponse = async (response: Response) => {
+      const outcome = await readHubOutcome(response);
+      logDiagnostic('proxy_hub_request_failed', requestId, {
+        method,
+        host,
+        hub_status: response.status,
+        outcome,
         elapsed_ms: elapsedSince(requestStartedAt),
       });
-      socket.end(renderErrorResponse(TUNNEL_OUTCOME.AGENT_NO_TUNNEL, {
+      socket.end(renderErrorResponse(outcome, { host, serviceName: serviceSubdomain, requestId, rayId }));
+    };
+
+    socket.off('data', onData);
+    socket.pause();
+
+    try {
+      /*
+       * 먼저 라우팅만 물어본다. 풀에서 꺼내 쓸 수 있으면 Agent에게 명령을 보낼
+       * 필요가 없으므로 Hub도 tunnel-connect를 생략한다.
+       */
+      const lookup = await askHub(true);
+      if (!lookup.ok) return await failWithHubResponse(lookup);
+
+      const routing = await lookup.json().catch(() => null) as {
+        agent_uuid?: unknown;
+        service_port?: unknown;
+        hub_db_query_ms?: unknown;
+      } | null;
+
+      logDiagnostic('proxy_hub_routing_completed', requestId, {
+        method,
         host,
-        serviceName: serviceSubdomain,
-        requestId,
-        rayId,
-      }));
-    }, {
-      requestId,
-      startedAt: requestStartedAt,
-      method,
-      host,
-      rayId,
-      onTunnelSetup: () => {
+        hub_db_query_ms: typeof routing?.hub_db_query_ms === 'number' ? routing.hub_db_query_ms : undefined,
+        elapsed_ms: elapsedSince(requestStartedAt),
+      });
+
+      const agentUuid = typeof routing?.agent_uuid === 'string' ? routing.agent_uuid : undefined;
+      const servicePort = typeof routing?.service_port === 'number' ? routing.service_port : undefined;
+      const pooled = agentUuid !== undefined ? claimPreconnected(agentUuid) : undefined;
+
+      // 꺼낸 뒤 쓸 수 없는 소켓이면(직전에 끊긴 경우) 없던 것으로 치고 폴백한다.
+      if (pooled !== undefined && servicePort !== undefined && pooled.writable) {
         tunnelConnected = true;
         logDiagnostic('proxy_tunnel_connected', requestId, {
           method,
           host,
           tunnel_setup_ms: elapsedSince(requestStartedAt),
+          path: 'preconnected',
         });
-      },
-      onTtfb: () => {
-        if (ttfbRecorded) return;
-        ttfbRecorded = true;
-        logDiagnostic('proxy_response_started', requestId, {
+
+        let pooledResponded = false;
+        pooled.once('data', () => {
+          pooledResponded = true;
+          onTtfb();
+        });
+        pooled.on('error', (error) => logDiagnostic('proxy_pooled_socket_error', requestId, {
           method,
           host,
-          ttfb_ms: elapsedSince(requestStartedAt),
+          error: error.message,
+        }));
+
+        /*
+         * 클레임과 첫 바이트 사이에 Agent가 이 소켓을 버릴 수 있다(PONG 타임아웃,
+         * keepalive 포기, Agent 재시작). 그대로 두면 아무것도 안 쓴 채 연결만 끊겨
+         * 클라이언트가 빈 응답을 받는다. 오류 페이지 체계를 빠져나가는 유일한 경로라
+         * 여기서 직접 그린다.
+         *
+         * pipe의 기본 동작(end: true)은 이 판단보다 먼저 클라이언트 소켓을 닫아
+         * 응답을 쓸 기회를 없애므로 끄고, 종료는 아래에서 직접 맡는다.
+         */
+        pooled.once('close', () => {
+          if (pooledResponded || socket.destroyed || socket.writableEnded) return void socket.end();
+
+          logDiagnostic('proxy_preconnect_dropped', requestId, {
+            method,
+            host,
+            outcome: TUNNEL_OUTCOME.AGENT_NO_TUNNEL,
+            elapsed_ms: elapsedSince(requestStartedAt),
+          });
+          socket.end(renderErrorResponse(TUNNEL_OUTCOME.AGENT_NO_TUNNEL, {
+            host,
+            serviceName: serviceSubdomain,
+            requestId,
+            rayId,
+          }));
         });
-      },
-    });
-    logDiagnostic('proxy_request_registered', requestId, {
-      method,
-      host,
-    });
-    socket.off('data', onData);
-    socket.pause();
+        socket.once('close', () => pooled.end());
 
-    const body = {
-      serviceSubdomain,
-      workspaceSubdomain,
-      token,
-    };
+        // OPEN 줄로 용도를 알려 준 뒤 곧바로 버퍼에 담아 둔 요청을 흘려보낸다.
+        pooled.write(`OPEN ${servicePort} ${requestId}\n`);
+        pooled.write(buffer);
 
-    try {
-      const response = await fetch(`${process.env.HUB_API_URL}/v1/tunnel/connect`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-internal-secret": process.env.TUNNEL_INTERNAL_SECRET ?? '',
-          "x-request-id": requestId,
-        },
-        body: JSON.stringify(body),
-      });
+        pooled.pipe(socket, { end: false });
+        socket.pipe(pooled);
+        return;
+      }
 
-      if (!response.ok) {
-        const outcome = await readHubOutcome(response);
-        logDiagnostic('proxy_hub_request_failed', requestId, {
+      logDiagnostic('proxy_preconnect_miss', requestId, { method, host });
+
+      /*
+       * 풀이 비었다. 클라이언트 소켓을 토큰으로 등록해 두고 Agent에게 터널을 열라고
+       * 시킨다. 등록이 명령보다 먼저여야 Agent가 빨리 붙어도 놓치지 않는다.
+       */
+      register(token, socket, buffer, () => {
+        logDiagnostic('agent_not_responding', requestId, {
           method,
           host,
-          hub_status: response.status,
-          outcome,
+          outcome: TUNNEL_OUTCOME.AGENT_NO_TUNNEL,
           elapsed_ms: elapsedSince(requestStartedAt),
         });
-        socket.end(renderErrorResponse(outcome, {
+        socket.end(renderErrorResponse(TUNNEL_OUTCOME.AGENT_NO_TUNNEL, {
           host,
           serviceName: serviceSubdomain,
           requestId,
           rayId,
         }));
-        return;
-      }
-
-      const hubDiagnostics = await response.json().catch(() => null) as {
-        hub_db_query_ms?: unknown;
-      } | null;
-      logDiagnostic('proxy_hub_routing_completed', requestId, {
+      }, {
+        requestId,
+        startedAt: requestStartedAt,
         method,
         host,
-        hub_db_query_ms: typeof hubDiagnostics?.hub_db_query_ms === 'number'
-          ? hubDiagnostics.hub_db_query_ms
-          : undefined,
+        rayId,
+        onTunnelSetup: () => {
+          tunnelConnected = true;
+          logDiagnostic('proxy_tunnel_connected', requestId, {
+            method,
+            host,
+            tunnel_setup_ms: elapsedSince(requestStartedAt),
+            path: 'token',
+          });
+        },
+        onTtfb,
+      });
+      logDiagnostic('proxy_request_registered', requestId, {
+        method,
+        host,
+      });
+
+      const fallback = await askHub(false);
+      if (!fallback.ok) return await failWithHubResponse(fallback);
+
+      /*
+       * 폴백은 Hub를 한 번 더 왕복한다. 이걸 안 찍으면 tunnel_setup_ms에는 포함되는데
+       * 어디에도 근거가 안 남아, 지연시간을 구간별로 나눠 볼 때 계산이 어긋난다.
+       */
+      const fallbackDiagnostics = await fallback.json().catch(() => null) as { hub_db_query_ms?: unknown } | null;
+      logDiagnostic('proxy_hub_fallback_completed', requestId, {
+        method,
+        host,
+        hub_db_query_ms: typeof fallbackDiagnostics?.hub_db_query_ms === 'number' ? fallbackDiagnostics.hub_db_query_ms : undefined,
         elapsed_ms: elapsedSince(requestStartedAt),
       });
     } catch (error) {
