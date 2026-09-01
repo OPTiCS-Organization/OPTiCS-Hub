@@ -22,6 +22,6 @@ import { TwoFactorAuthenticationService } from './2fa.service';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtUtil, JwtStrategy, JwtGuard, TwoFactorAuthenticationService],
-  exports: [AuthModule, JwtModule, JwtStrategy, JwtGuard, JwtUtil, TwoFactorAuthenticationService],
+  exports: [JwtModule, JwtStrategy, JwtGuard, JwtUtil, TwoFactorAuthenticationService],
 })
 export class AuthModule {}
