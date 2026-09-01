@@ -6,6 +6,7 @@ import { Code } from 'src/global/Code.enum';
 import { RedeployService } from '../dto/RedeployService.dto';
 import { UpdateServiceSubdomain } from '../dto/UpdateServiceSubdomain.dto';
 import { UpdateServiceEndpoints } from '../dto/UpdateServiceEndpoints.dto';
+import { AgentNotConnectedException } from 'src/global/exception/AgentNotConnected.exception';
 
 @Controller({ path: 'service', version: '1' })
 export class ServiceController {

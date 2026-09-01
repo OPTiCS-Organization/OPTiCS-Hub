@@ -6,6 +6,7 @@ import { ConsoleGateway } from 'src/agent/console.gateway';
 import { DeployPreset, Prisma } from '@prisma/client';
 import { ServiceEndpoint, ServicePortMapping, ServiceSourceRepository, ServiceSourceInput } from './types/service.type';
 import { RedeployService } from './dto/RedeployService.dto';
+import { AgentNotConnectedException } from 'src/global/exception/AgentNotConnected.exception';
 
 @Injectable()
 export class ServiceService {
@@ -25,7 +26,7 @@ export class ServiceService {
 
   /** TODO: serviceIdx 타입 number로 변경 */
   private async findOwnedServiceAndAgent(owner: number, serviceIdx: string | number) {
-    const serviceIndex = this.parseServiceIndex(serviceIdx);
+    const serviceIndex = this.parseServiceIndex(serviceIdx); // 1
     const rawService = await this.prismaService.services.findFirst({
       where: {
         service_index: serviceIndex,
@@ -38,7 +39,7 @@ export class ServiceService {
     });
     if (!rawService) throw new NotFoundException('Service Not Found.');
 
-    const rawAgent = await this.prismaService.agents.findFirst({
+    const rawAgent = await this.prismaService.agents.findFirst({  // 서비스가 배포된 에이전트와 연결이 끊어지면 재배포가 불가능하다.
       where: {
         agent_index: rawService.service_parent_agent,
         agent_parent_workspace: rawService.service_parent_workspace,
@@ -46,7 +47,8 @@ export class ServiceService {
         agent_deleted_at: null,
       },
     });
-    if (!rawAgent) throw new NotFoundException('Service Not Found.');
+    // 에이전트의 연결이 끊어졌더라도 서비스의 재배포를 막아선 안된다.
+    // if (!rawAgent) throw new NotFoundException('Service Not Found.');
 
     return { rawService, rawAgent };
   }
@@ -360,6 +362,7 @@ export class ServiceService {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
     const scope = deleteScope === 'service' ? 'service' : 'containers';
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'DELETE',
       serviceIndex: rawService.service_index,
@@ -401,7 +404,7 @@ export class ServiceService {
     const targetAgent = await this.prismaService.agents.findFirst({
       where: {
         agent_index: body.agentIndex,
-        agent_parent_workspace: rawAgent.agent_parent_workspace,
+        agent_parent_workspace: rawService.service_parent_workspace,
         agent_status: 'online',
         agent_deleted_at: null,
       },
@@ -416,7 +419,7 @@ export class ServiceService {
     if (!targetAgent) throw new NotFoundException('Target agent is offline or deleted.');
 
     // 배포 대상 Agent가 변경되었고, 기존 Agent가 온라인인 경우, 해당 Agent에서 동작중인 Service 중지
-    if (body.agentIndex && rawService.service_parent_agent !== body.agentIndex && rawAgent.agent_status == 'online')
+    if (body.agentIndex && rawService.service_parent_agent !== body.agentIndex && rawAgent && rawAgent.agent_status == 'online')
       await this.handleStopService(owner, String(rawService.service_index));
 
     const rawSourceUrlForUpdate = body.serviceSourceUrl ?? rawService.service_source_url;
@@ -524,6 +527,7 @@ export class ServiceService {
       throw new ConflictException('Removed service must be redeployed before it can be started.');
     }
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'START',
       serviceIndex: rawService.service_index,
@@ -553,6 +557,7 @@ export class ServiceService {
       throw new ConflictException('Removed service cannot be stopped.');
     }
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'STOP',
       serviceIndex: rawService.service_index,
@@ -582,6 +587,7 @@ export class ServiceService {
       throw new ConflictException('Removed service must be redeployed before containers can be started.');
     }
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_START',
       serviceIndex: rawService.service_index,
@@ -607,6 +613,7 @@ export class ServiceService {
       throw new ConflictException('Removed service containers cannot be stopped.');
     }
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_STOP',
       serviceIndex: rawService.service_index,
@@ -632,6 +639,7 @@ export class ServiceService {
       throw new ConflictException('Removed service must be redeployed before containers can be restarted.');
     }
 
+    if (!rawAgent) throw new AgentNotConnectedException();
     const sent = this.agentGateway.sendToAgent(rawAgent.agent_uuid, 'command', {
       command: 'CONTAINER_RESTART',
       serviceIndex: rawService.service_index,
