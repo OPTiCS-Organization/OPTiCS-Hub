@@ -11,6 +11,6 @@ import { ReleasesModule } from 'src/releases/releases.module';
   imports: [AuthModule, ReleasesModule],
   controllers: [AgentController],
   providers: [AgentService, AgentGateway, ConsoleGateway, AgentUpdateService],
-  exports: [AgentGateway, ConsoleGateway, AgentUpdateService],
+  exports: [AgentService, AgentGateway, ConsoleGateway, AgentUpdateService],
 })
 export class AgentModule {}

@@ -1,6 +1,4 @@
 import { Module } from '@nestjs/common';
-import { WorkspaceController } from './workspaces/v1/workspace.controller';
-import { WorkspaceService } from './workspaces/workspace.service';
 import { WorkspaceModule } from './workspaces/workspace.module';
 import { ServiceModule } from './services/service.module';
 import { AuthModule } from './auth/auth.module';
@@ -21,20 +19,18 @@ import { MailerModule } from './mailer/mailer.module';
 @Module({
   imports: [
     SentryModule.forRoot(),
-    WorkspaceModule,
-    ServiceModule,
-    AuthModule,
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     AgentModule,
+    AuthModule,
     ReleasesModule,
+    ServiceModule,
     TunnelModule,
     UtilityModule,
+    WorkspaceModule,
     MailerModule.forRootAsync(),
   ],
-  controllers: [WorkspaceController],
   providers: [
-    WorkspaceService,
     { provide: APP_FILTER, useClass: SentryGlobalFilter },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
     { provide: APP_FILTER, useClass: TokenRefreshFilter },

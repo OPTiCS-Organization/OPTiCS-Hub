@@ -9,20 +9,39 @@
  * 소켓이 도착했을 때 서로 이어 줍니다.
  */
 import net from 'net'
+import { PRECONNECT_VERB, handlePreconnect } from './preconnect.ts';
 import { claim, register, release } from './registry.ts';
 
 const controlServer = net.createServer((socket) => {
   let buffer = Buffer.alloc(0);
   let token = '';
 
+  /**
+   * Data case
+   * PRE AGENT_UUID TIMESTAMP NONCE HASH\n: Agent 커넥션 풀 형성
+   * OPEN TARGET_PORT REQ_ID\n: 존재하는 커넥션 풀에 연결 수립
+   * CONNECT_TOKEN\n: 풀이 존재하지 않는 에이전트와 통신
+  */
   const onData = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk]);
     const idx = buffer.indexOf(0x0a)  // \n의 바이트 값 0a
     if (idx == -1) return;
 
-    token = buffer.subarray(0, idx).toString();
-    const exist = claim(token);
+    const line = buffer.subarray(0, idx).toString();
     socket.off('data', onData);
+
+    /*
+     * 아래 토큰을 사용한 소켓은 즉시 짝지어 파이핑하지만, 프리커넥팅은 OPEN이 올 때까지 살아 있어야 한다.
+     */
+    if (line.startsWith(`${PRECONNECT_VERB} `)) {
+      // close 핸들러가 토큰 경로의 release를 부르지 않도록 떼어 낸다.
+      socket.off('close', onClose);
+      void handlePreconnect(socket, line, buffer.subarray(idx + 1));
+      return;
+    }
+
+    token = line;
+    const exist = claim(token);
 
     if (exist) {
       exist.diagnostics?.onTunnelSetup();
