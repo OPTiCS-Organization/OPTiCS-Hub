@@ -1,8 +1,8 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
-import { isProtocolSupported, SUPPORTED_PROTOCOL } from 'src/global/protocol';
+import { SUPPORTED_PROTOCOL } from 'src/global/protocol';
 import { compareSemver } from 'src/global/semver.util';
 
 /** 릴리즈 자산으로 발행되는 메타데이터. Agent 저장소의 릴리즈 워크플로가 만든다. */
@@ -10,6 +10,14 @@ type ReleaseMetadata = {
   version: string;
   protocol: number;
   image: string;
+  /**
+   * 자산(release.json)이 선언한 차단 사유. 채워져 있으면 그 이유로 설치를 막는다.
+   * 동기화할 때마다 자산 값으로 덮이며, 운영자가 건 차단(release_manual_block)과는 별개다.
+   *
+   * 릴리즈를 삭제해도 설치는 막히지만 패치노트와 이력까지 사라지고, 이미 그 버전을 돌리는
+   * Agent에게 아무 설명도 남지 않는다. 여기에 이유를 남기면 목록에는 그대로 두고 설치만 막는다.
+   */
+  blocked: string | null;
 };
 
 type GithubAsset = { name: string; url: string };
@@ -117,6 +125,7 @@ export class ReleaseCatalogService {
           release_image: metadata.image,
           release_notes: release.body,
           release_published_at: publishedAt,
+          release_blocked: metadata.blocked,
         },
         update: {
           release_channel: release.prerelease ? 'beta' : 'stable',
@@ -124,7 +133,9 @@ export class ReleaseCatalogService {
           release_image: metadata.image,
           release_notes: release.body,
           release_published_at: publishedAt,
+          release_blocked: metadata.blocked,
           release_yanked_at: null,                          // 되살아났다면 회수 표시를 푼다.
+          // release_manual_block은 일부러 빼 둔다. 운영자가 건 차단은 동기화로 풀리면 안 된다.
         },
       });
     }
@@ -162,7 +173,13 @@ export class ReleaseCatalogService {
 
       const parsed = (await response.json()) as Partial<ReleaseMetadata>;
       if (!parsed.version || typeof parsed.protocol !== 'number' || !parsed.image) return null;
-      return { version: parsed.version, protocol: parsed.protocol, image: parsed.image };
+      return {
+        version: parsed.version,
+        protocol: parsed.protocol,
+        image: parsed.image,
+        // 빈 문자열은 "막지 않음"으로 읽는다. 이유 없는 차단은 사용자에게 아무것도 알려주지 못한다.
+        blocked: typeof parsed.blocked === 'string' && parsed.blocked.trim() ? parsed.blocked.trim() : null,
+      };
     } catch (error) {
       log(`[Release Catalog] Failed to read ${asset.name}: ${String(error)}`, 500, 'ERROR');
       return null;
@@ -179,16 +196,24 @@ export class ReleaseCatalogService {
     // 발행일이 아니라 버전으로 정렬한다. 구버전 라인 핫픽스가 '최신'이 되면 안 된다.
     rows.sort((a, b) => compareSemver(b.release_version, a.release_version));
 
-    return rows.map((row) => ({
-      version: row.release_version,
-      channel: row.release_channel,
-      protocol: row.release_protocol,
-      notes: row.release_notes,
-      publishedAt: row.release_published_at,
-      yanked: row.release_yanked_at !== null,
-      installable: row.release_yanked_at === null && isProtocolSupported(row.release_protocol),
-      blockedReason: this.blockedReason(row.release_protocol, row.release_yanked_at),
-    }));
+    return rows.map((row) => {
+      // installable을 따로 계산하면 assertInstallable과 어긋나, 목록에서는 고를 수 있는데
+      // 누르면 거부되는 버전이 생긴다. 사유 하나에서 둘 다 끌어낸다.
+      const reason = this.blockedReason(row);
+      return {
+        version: row.release_version,
+        channel: row.release_channel,
+        protocol: row.release_protocol,
+        notes: row.release_notes,
+        publishedAt: row.release_published_at,
+        yanked: row.release_yanked_at !== null,
+        installable: reason === null,
+        blockedReason: reason,
+        // 해제할 수 있는 차단인지. 회수나 프로토콜 때문에 막힌 것은 운영자가 풀 수 없으므로
+        // 이 값이 false면 Console도 해제 버튼을 내주지 않는다.
+        manuallyBlocked: row.release_manual_block !== null,
+      };
+    });
   }
 
   /**
@@ -220,19 +245,82 @@ export class ReleaseCatalogService {
     if (!release) {
       throw new ServiceUnavailableException(`Unknown agent release: ${version}`);
     }
-    const reason = this.blockedReason(release.release_protocol, release.release_yanked_at);
+    const reason = this.blockedReason(release);
     if (reason) throw new ServiceUnavailableException(reason);
 
     return release;
   }
 
-  private blockedReason(protocol: number, yankedAt: Date | null): string | null {
-    if (yankedAt) return '이 버전은 회수되었습니다.';
-    if (protocol < SUPPORTED_PROTOCOL.min) {
-      return `이 버전의 프로토콜(v${protocol})은 더 이상 지원되지 않습니다.`;
+  /**
+   * 운영자가 특정 버전의 설치를 막는다. 이유는 그대로 사용자에게 보이므로 무엇이 문제인지 적는다.
+   *
+   * 릴리즈를 삭제하는 것과 다르다. 목록과 패치노트는 그대로 남고 설치만 막히므로,
+   * 이미 그 버전을 돌리는 Agent의 사용자도 자기 버전에 무슨 일이 있는지 볼 수 있다.
+   */
+  async blockRelease(version: string, reason: string) {
+    const release = await this.prismaService.agent_releases.findUnique({
+      where: { release_version: version },
+    });
+    if (!release) throw new NotFoundException(`Unknown agent release: ${version}`);
+
+    await this.prismaService.agent_releases.update({
+      where: { release_version: version },
+      data: { release_manual_block: reason },
+    });
+    log(`[Release Catalog] Blocked ${version}: ${reason}`, 200, 'INFO');
+  }
+
+  /**
+   * 이미 그 버전을 돌리고 있는 Agent에게 알릴 사유. 막을 이유가 없으면 null.
+   *
+   * 카탈로그에 없는 버전(로컬 빌드나 목록에서 밀려난 옛 버전)은 판단할 근거가 없으므로 null이다.
+   * 여기서 "알 수 없음"을 경고로 바꾸면 정상적인 구버전 사용자에게까지 겁을 준다.
+   */
+  async blockedReasonForVersion(version: string | null): Promise<string | null> {
+    if (!version) return null;
+
+    const release = await this.prismaService.agent_releases.findUnique({
+      where: { release_version: version },
+    });
+    if (!release) return null;
+
+    return this.blockedReason(release);
+  }
+
+  /** 운영자 차단만 푼다. 회수나 프로토콜 때문에 막힌 것은 그대로 남는다. */
+  async unblockRelease(version: string) {
+    const release = await this.prismaService.agent_releases.findUnique({
+      where: { release_version: version },
+    });
+    if (!release) throw new NotFoundException(`Unknown agent release: ${version}`);
+
+    await this.prismaService.agent_releases.update({
+      where: { release_version: version },
+      data: { release_manual_block: null },
+    });
+    log(`[Release Catalog] Unblocked ${version}`, 200, 'INFO');
+  }
+
+  /**
+   * 설치할 수 없는 이유. 없으면 null.
+   *
+   * 운영자 차단을 가장 먼저 본다. 사고 대응으로 건 차단이 다른 사유에 가려지면
+   * 사용자에게 엉뚱한 설명이 나가고, 무엇보다 왜 막혔는지 운영자가 추적하기 어려워진다.
+   */
+  private blockedReason(release: {
+    release_protocol: number;
+    release_yanked_at: Date | null;
+    release_blocked: string | null;
+    release_manual_block: string | null;
+  }): string | null {
+    if (release.release_manual_block) return release.release_manual_block;
+    if (release.release_blocked) return release.release_blocked;
+    if (release.release_yanked_at) return '이 버전은 회수되었습니다.';
+    if (release.release_protocol < SUPPORTED_PROTOCOL.min) {
+      return `이 버전의 프로토콜(v${release.release_protocol})은 더 이상 지원되지 않습니다.`;
     }
-    if (protocol > SUPPORTED_PROTOCOL.current) {
-      return `이 버전은 Hub보다 최신 프로토콜(v${protocol})을 요구합니다. Hub를 먼저 업데이트해야 합니다.`;
+    if (release.release_protocol > SUPPORTED_PROTOCOL.current) {
+      return `이 버전은 현재 동작중인 Hub보다 최신 프로토콜(v${release.release_protocol})을 요구합니다.`;
     }
     return null;
   }

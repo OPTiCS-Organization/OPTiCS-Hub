@@ -192,6 +192,12 @@ model agent_releases {
   /// GitHub에서 릴리즈가 사라지면 채운다. 행은 지우지 않는다.
   /// 이미 그 버전을 설치한 Agent의 agent_version이 미아가 되기 때문이다.
   release_yanked_at    DateTime?
+  /// 릴리즈 자산(release.json)이 선언한 차단 사유. 동기화할 때마다 자산 값으로 덮인다.
+  release_blocked      String?   @db.Text
+  /// 운영자가 API로 건 차단 사유.
+  /// 동기화가 건드리지 않는 별도 칸이어야 한다. 같은 칸을 쓰면 15분 뒤 동기화가 자산 값으로
+  /// 덮어써서, 사고 대응으로 막아 둔 버전이 조용히 다시 설치 가능해진다.
+  release_manual_block String?   @db.Text
 
   @@index([release_published_at])
 }
