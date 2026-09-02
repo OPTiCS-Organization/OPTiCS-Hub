@@ -132,13 +132,47 @@ export class ReleaseCatalogService implements OnModuleInit, OnModuleDestroy {
     return this.syncing;
   }
 
+  /**
+   * 실패한 응답에서 사람이 읽을 원인을 뽑아낸다.
+   *
+   * 403 하나만 남기면 "한도 초과"인지 "토큰이 이 저장소에 접근 못 함"인지 구분할 수 없다.
+   * 둘은 대응이 완전히 다르고(기다리기 vs 토큰 권한 수정), GitHub은 그 답을 본문 message와
+   * x-ratelimit 헤더에 이미 담아 보낸다. 버리지 않고 로그까지 끌고 간다.
+   */
+  private async failureDetail(response: Response): Promise<string> {
+    const remaining = response.headers.get('x-ratelimit-remaining');
+    const limit = response.headers.get('x-ratelimit-limit');
+    const reset = response.headers.get('x-ratelimit-reset');
+
+    let message = '';
+    try {
+      const body = (await response.json()) as { message?: string };
+      if (body?.message) message = body.message;
+    } catch {
+      // 본문이 JSON이 아닐 수 있다. 그때는 헤더만으로 충분하다.
+    }
+
+    const parts: string[] = [];
+    if (message) parts.push(message);
+    // remaining이 0이면 한도 문제, 남아 있는데 403이면 권한 문제다. 이 한 줄이 갈림길이 된다.
+    if (remaining !== null) parts.push(`ratelimit ${remaining}/${limit ?? '?'}`);
+    if (remaining === '0' && reset) {
+      parts.push(`resets at ${new Date(Number(reset) * 1000).toISOString()}`);
+    }
+    parts.push(`auth ${this.configService.get<string>('GITHUB_TOKEN') ? 'token' : 'anonymous'}`);
+
+    return `(${parts.join(', ')})`;
+  }
+
   private async runSync(): Promise<void> {
     const response = await fetch(
       `https://api.github.com/repos/${this.repo}/releases?per_page=100`,
       { headers: this.headers() },
     );
     if (!response.ok) {
-      throw new ServiceUnavailableException(`GitHub releases fetch failed: ${response.status}`);
+      throw new ServiceUnavailableException(
+        `GitHub releases fetch failed: ${response.status} ${await this.failureDetail(response)}`,
+      );
     }
 
     const releases = (await response.json()) as GithubRelease[];
