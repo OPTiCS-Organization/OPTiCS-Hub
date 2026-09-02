@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleDestroy, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import log from 'spectra-log';
 import { PrismaService } from 'src/prisma.service';
@@ -32,7 +32,19 @@ type GithubRelease = {
 
 const METADATA_ASSET = 'release.json';
 const DEFAULT_REPO = 'OPTiCS-Organization/OPTiCS-Agent';
-/** 읽기 요청이 이 시간보다 오래된 캐시를 만나면 먼저 동기화한다. */
+/**
+ * 주기 동기화 간격.
+ *
+ * 이 간격이 곧 "릴리즈를 내거나 차단한 뒤 Console에 반영되기까지의 최대 지연"이다.
+ * 짧을수록 GitHub API 호출이 그대로 늘어난다. 한 번 돌 때 릴리즈 목록 1회 +
+ * release.json 자산 1회씩(릴리즈 수만큼)이 나가므로, GITHUB_TOKEN 없이는
+ * 시간당 60회 제한에 바로 걸린다.
+ */
+const SYNC_INTERVAL_MS = 60 * 1000;
+/**
+ * 주기 동기화가 멈춘 경우에만 쓰이는 안전망.
+ * 스케줄러가 살아 있으면 lastSyncedAt이 계속 갱신되어 이 경로는 타지 않는다.
+ */
 const FRESHNESS_MS = 15 * 60 * 1000;
 /** 동기화가 실패한 뒤 다시 시도하기까지의 최소 간격. GitHub 장애 때 매 요청마다 때리지 않기 위한 것이다. */
 const RETRY_BACKOFF_MS = 60 * 1000;
@@ -43,9 +55,14 @@ const RETRY_BACKOFF_MS = 60 * 1000;
  * GitHub Releases를 캐시하되, release.json 자산이 붙은 릴리즈만 받아들인다.
  * 그 자산은 이미지 푸시가 성공한 뒤에만 발행되므로 자산의 존재가 곧 이미지 존재의 영수증이고,
  * 덕분에 '패치노트는 보이는데 docker pull하면 죽는 버전'이 카탈로그에 오를 수 없다.
+ *
+ * 캐시는 기동 직후와 이후 SYNC_INTERVAL_MS 마다 갱신한다. 읽기 시점 갱신(ensureFresh)만
+ * 두면 아무도 보지 않는 동안에는 캐시가 늙고, 차단을 건 직후처럼 즉시 퍼져야 하는 변경이
+ * 다음 조회 때까지 반영되지 않는다.
  */
 @Injectable()
-export class ReleaseCatalogService {
+export class ReleaseCatalogService implements OnModuleInit, OnModuleDestroy {
+  private syncTimer: NodeJS.Timeout | null = null;
   private lastSyncedAt = 0;
   private lastAttemptAt = 0;
   private syncing: Promise<void> | null = null;
@@ -54,6 +71,31 @@ export class ReleaseCatalogService {
     private readonly prismaService: PrismaService,
     private readonly configService: ConfigService,
   ) { }
+
+  onModuleInit() {
+    // 기동 직후 한 번 채워 둔다. 첫 조회가 GitHub 왕복을 기다리지 않게 하려는 것이다.
+    void this.runScheduledSync();
+    this.syncTimer = setInterval(() => void this.runScheduledSync(), SYNC_INTERVAL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.syncTimer) clearInterval(this.syncTimer);
+    this.syncTimer = null;
+  }
+
+  /**
+   * 주기 동기화 한 회차.
+   *
+   * 실패를 삼키는 이유는 여기서 던지면 타이머 콜백 밖으로 나가 프로세스를 죽이기 때문이다.
+   * GitHub 장애나 요청 한도 초과는 다음 회차에 저절로 회복되므로, 남은 캐시를 계속 쓰면 된다.
+   */
+  private async runScheduledSync(): Promise<void> {
+    try {
+      await this.sync();
+    } catch (error) {
+      log(`[Release Catalog] Scheduled sync failed: ${String(error)}`, 500, 'ERROR');
+    }
+  }
 
   private get repo(): string {
     return this.configService.get<string>('AGENT_RELEASE_REPO') ?? DEFAULT_REPO;
