@@ -37,7 +37,6 @@ export class TwoFactorGuard implements CanActivate {
       throw new UnauthorizedException('Authentication is required.');
     }
 
-    // 2FA가 꺼져 있는 계정은 기존 JWT 인증만으로 통과시킨다.
     const user = await this.prismaService.users.findUnique({
       where: {
         user_index: userIndex,
@@ -47,7 +46,7 @@ export class TwoFactorGuard implements CanActivate {
       },
     });
 
-    // 2FA가 활성화되지 않은 계정은 통과할 수 없음
+    // 이 가드가 붙은 엔드포인트는 2FA 필수다. 활성화하지 않으면 접근할 수 없다.
     if (!user?.user_totp_active) {
       throw new ForbiddenException('Two Factor Authentication must be enabled.');
     }

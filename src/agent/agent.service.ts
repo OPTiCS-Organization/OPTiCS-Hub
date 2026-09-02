@@ -194,11 +194,19 @@ export class AgentService implements OnModuleInit {
 
     // 카탈로그는 Agent마다 다시 읽을 필요가 없다. 한 번 조회해 전부에 적용한다.
     const upgrades = new Map<string, { version: string; notes: string | null } | null>();
+    const blocked = new Map<string, string | null>();
     for (const version of new Set(rawAgents.map((a) => a.agent_version))) {
       const upgrade = await this.releaseCatalogService
         .findUpgradeFor(version)
         .catch(() => null);
       upgrades.set(version ?? '', upgrade ? { version: upgrade.version, notes: upgrade.notes } : null);
+
+      // 지금 돌리고 있는 버전이 막힌 경우를 알려주기 위한 것이다. 목록을 열어봐야만 알 수 있으면
+      // 정작 그 버전을 쓰는 사람은 문제를 모른 채 계속 쓴다.
+      blocked.set(
+        version ?? '',
+        await this.releaseCatalogService.blockedReasonForVersion(version).catch(() => null),
+      );
     }
 
     return rawAgents.map((a) => ({
@@ -218,6 +226,7 @@ export class AgentService implements OnModuleInit {
       updateMessage: a.agent_update_message,
       updateStartedAt: a.agent_update_started_at,
       upgrade: upgrades.get(a.agent_version ?? '') ?? null,
+      versionBlocked: blocked.get(a.agent_version ?? '') ?? null,
       remoteUpdateSupported: supportsRemoteUpdate(a.agent_version),
     }));
   }

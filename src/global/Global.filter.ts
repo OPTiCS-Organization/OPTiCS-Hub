@@ -71,7 +71,6 @@ export class TokenRefreshFilter implements ExceptionFilter {
 export class HttpExceptionFilter implements ExceptionFilter {
   @SentryExceptionCaptured()
   catch(exception: any, host: ArgumentsHost) {
-    // const _Response: GlobalResponse = {}; 사용하지 않는 변수
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const statusCode = exception.getStatus
