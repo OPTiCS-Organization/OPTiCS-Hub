@@ -297,11 +297,6 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  /**
-   * 연결 수락 시 일단 IP부터 저장,
-   * Agent가 Validation 이벤트 emit할 때까지 대기
-   * @param client
-   */
   async handleConnection() {
     log('[Agent Gateway] Connection Established', 200, 'INFO')
   }
