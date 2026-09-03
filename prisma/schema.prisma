@@ -154,6 +154,15 @@ model service_endpoints {
   @@unique([endpoint_parent_workspace, endpoint_subdomain, endpoint_deleted_at])
 }
 
+/// Cloudflare GraphQL Analytics API에서 하루 단위로 가져온 워크스페이스 트래픽 바이트 합계.
+model traffic_daily {
+  /// UTC 기준 하루(자정 시각으로 저장). @db.Date로 시각 정보를 버려 같은 날짜가 항상 같은 키가 되게 한다.
+  traffic_date      DateTime @id @db.Date
+  /// BigInt인 이유: 트래픽 바이트 합계는 JS Number의 안전 정수 범위(2^53)를 금방 넘어선다.
+  traffic_bytes     BigInt
+  traffic_synced_at DateTime @updatedAt
+}
+
 enum UserPermission {
   unverified
   verified
