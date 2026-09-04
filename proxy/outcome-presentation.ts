@@ -70,6 +70,18 @@ const PRESENTATIONS: Record<Exclude<TunnelOutcome, 'success'>, OutcomePresentati
     (host) => `The workspace exists, but it has no service published at <code>${host}</code>. The address may be misspelled, or the service may have been removed.`,
   ),
 
+  /*
+   * hidden 모드로 차단한 서비스는 이 줄에 오지 않는다. Hub가 outcome 자체를
+   * service_not_found로 바꿔서 내려보내므로, 없는 서비스와 응답이 완전히 같아진다.
+   * 여기 오는 것은 notice 모드뿐이다.
+   *
+   * 차단 사유(service_traffic_block_reason)는 싣지 않는다. 운영자가 적는 메모라
+   * 공개 인터넷에 그대로 내보낼 값이 아니다. 사유는 콘솔과 API에만 남는다.
+   */
+  [TUNNEL_OUTCOME.SERVICE_BLOCKED]: SERVICE_UNAVAILABLE(
+    (host) => `Traffic to <code>${host}</code> has been suspended by an operator. The service itself may still be running, but OPTiCS is not forwarding requests to it right now.`,
+  ),
+
   [TUNNEL_OUTCOME.AGENT_NOT_FOUND]: SERVICE_UNAVAILABLE(
     (host) => `The service at <code>${host}</code> is not linked to a deployment agent, so the OPTiCS Gateway had nowhere to forward your request.`,
   ),

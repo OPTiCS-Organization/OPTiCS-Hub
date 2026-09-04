@@ -7,6 +7,8 @@ import { DeployPreset, Prisma } from '@prisma/client';
 import { ServiceEndpoint, ServicePortMapping, ServiceSourceRepository, ServiceSourceInput } from './types/service.type';
 import { RedeployService } from './dto/RedeployService.dto';
 import { AgentNotConnectedException } from 'src/global/exception/AgentNotConnected.exception';
+import { BlockServiceTraffic } from './dto/BlockServiceTraffic.dto';
+import { TunnelService } from 'src/tunnel/tunnel.service';
 
 @Injectable()
 export class ServiceService {
@@ -14,6 +16,7 @@ export class ServiceService {
     private readonly prismaService: PrismaService,
     private readonly agentGateway: AgentGateway,
     private readonly consoleGateway: ConsoleGateway,
+    private readonly tunnelService: TunnelService,
   ) { };
 
   private parseServiceIndex(serviceIdx: string | number) {
@@ -581,6 +584,73 @@ export class ServiceService {
     return { serviceIndex: rawService.service_index };
   }
 
+  /**
+   * 이 서비스로 가는 트래픽을 끊는다.
+   *
+   * 컨테이너에는 손대지 않는다. STOP과는 다른 동작이고, 그래야 하는 이유가 있다.
+   * 트래픽만 끊으면 서비스는 그대로 돌면서 큐를 비우거나 배치를 마칠 수 있고,
+   * 운영자는 외부 노출만 즉시 막을 수 있다. 컨테이너까지 내리면 되돌리는 데
+   * 재시작 시간이 들고, 그 사이 상태가 날아가는 서비스도 있다.
+   *
+   * Agent가 끊겨 있어도 걸린다. 차단은 Hub의 라우팅 판단이라 Agent와 무관하다.
+   */
+  async handleBlockServiceTraffic(owner: number, serviceIdx: string, options: BlockServiceTraffic) {
+    const { rawService } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+    if (rawService.service_status === 'removed') {
+      throw new ConflictException('Removed service has no traffic to block.');
+    }
+
+    /*
+     * 이미 막혀 있어도 거절하지 않고 덮어쓴다. 모드나 사유만 바꾸려는 호출이
+     * 409로 튕기면 '풀었다 다시 막기'를 시켜야 하고, 그 사이가 구멍이 된다.
+     * blocked_at은 처음 막은 시각을 지키기 위해 이미 값이 있으면 두고 간다.
+     */
+    const updated = await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: {
+        service_traffic_blocked_at: rawService.service_traffic_blocked_at ?? new Date(),
+        service_traffic_block_mode: options.mode ?? 'notice',
+        service_traffic_block_reason: options.reason?.trim() || null,
+      },
+    });
+
+    this.tunnelService.invalidateRouteCache();
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
+    return this.toTrafficBlockView(updated);
+  }
+
+  /** 차단을 푼다. 사유와 모드는 다음 차단 때 다시 받으므로 같이 비운다. */
+  async handleUnblockServiceTraffic(owner: number, serviceIdx: string) {
+    const { rawService } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
+
+    const updated = await this.prismaService.services.update({
+      where: { service_index: rawService.service_index },
+      data: {
+        service_traffic_blocked_at: null,
+        service_traffic_block_reason: null,
+        service_traffic_block_mode: 'notice',
+      },
+    });
+
+    this.tunnelService.invalidateRouteCache();
+    this.consoleGateway.notifyWorkspaceUpdated(rawService.service_parent_workspace);
+    return this.toTrafficBlockView(updated);
+  }
+
+  private toTrafficBlockView(service: {
+    service_index: number;
+    service_traffic_blocked_at: Date | null;
+    service_traffic_block_mode: string;
+    service_traffic_block_reason: string | null;
+  }) {
+    return {
+      serviceIndex: service.service_index,
+      trafficBlockedAt: service.service_traffic_blocked_at,
+      trafficBlockMode: service.service_traffic_block_mode,
+      trafficBlockReason: service.service_traffic_block_reason,
+    };
+  }
+
   async handleStartContainer(owner: number, serviceIdx: string, containerName: string) {
     const { rawService, rawAgent } = await this.findOwnedServiceAndAgent(owner, serviceIdx);
     if (rawService.service_status === 'removed') {
@@ -793,6 +863,9 @@ export class ServiceService {
         serviceRootDirectory: s.service_root_directory,
         serviceEnv: this.normalizeEnv(s.service_env),
         serviceStatus: s.service_status,
+        trafficBlockedAt: s.service_traffic_blocked_at,
+        trafficBlockMode: s.service_traffic_block_mode,
+        trafficBlockReason: s.service_traffic_block_reason,
         serviceSubdomain: primaryEndpoint?.endpoint_subdomain ?? s.service_subdomain,
         serviceVersion: s.service_version,
         serviceDeployPreset: s.service_deploy_preset,

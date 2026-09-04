@@ -90,6 +90,18 @@ export class TunnelService {
     return delivered ? TUNNEL_OUTCOME.SUCCESS : TUNNEL_OUTCOME.AGENT_OFFLINE;
   }
 
+  /**
+   * 라우팅 캐시를 통째로 비운다.
+   *
+   * 차단은 즉시 걸려야 하는데, 캐시된 경로는 DB를 보지 않고 그대로 통과한다.
+   * 항목을 골라 지우려면 서비스에 달린 엔드포인트 서브도메인을 전부 되짚어야 하고,
+   * 그 조회가 틀리면 차단이 조용히 새어 나간다. 캐시는 수명이 5초이고 크기도 작아
+   * 전부 버리는 편이 싸고 확실하다.
+   */
+  invalidateRouteCache() {
+    this.routeCache.clear();
+  }
+
   private async cacheSigningSecret(agentUuid: string) {
     const secret = await this.agentService.getSigningSecret(agentUuid);
     this.signingSecretCache.set(agentUuid, { secret, expiresAt: Date.now() + SIGNING_SECRET_TTL_MS });
@@ -106,6 +118,8 @@ export class TunnelService {
     let endpointQueryMs = 0;
     let queryCount = 0;
     let outcome: TunnelOutcome = TUNNEL_OUTCOME.DB_ERROR;
+    /** hidden 모드는 밖으로 나가는 outcome을 가리므로, 로그에는 따로 남겨야 추적이 된다. */
+    let blocked = false;
     const routeKey = `${workspaceSubdomain}/${normalizedServiceSubdomain}`;
     let servedFromCache = false;
 
@@ -155,6 +169,8 @@ export class TunnelService {
             service: {
               select: {
                 service_status: true,
+                service_traffic_blocked_at: true,
+                service_traffic_block_mode: true,
                 agent: {
                   select: {
                     agent_uuid: true,
@@ -180,6 +196,25 @@ export class TunnelService {
       if (!endpoint) {
         outcome = TUNNEL_OUTCOME.SERVICE_NOT_FOUND;
         throw new NotFoundException({ outcome, message: 'Service not found' });
+      }
+
+      /*
+       * 차단은 에이전트를 보기 전에 끊는다. 운영자가 트래픽을 막았다면 에이전트가
+       * 살아 있는지는 답을 바꾸지 않고, 살아 있을 때 tunnel-connect를 보내면
+       * 차단한 서비스로 소켓이 한 번 열린다.
+       */
+      if (endpoint.service.service_traffic_blocked_at) {
+        blocked = true;
+        /*
+         * hidden은 존재 자체를 숨긴다. 게이트웨이는 outcome 하나로만 페이지를 고르므로
+         * 여기서 service_not_found로 바꿔 보내면 없는 서비스와 응답이 완전히 같아진다.
+         * 게이트웨이에 모드를 알려 주고 거기서 다시 분기하게 만들면 분기 축이 둘로 늘어난다.
+         */
+        const hidden = endpoint.service.service_traffic_block_mode === 'hidden';
+        outcome = hidden ? TUNNEL_OUTCOME.SERVICE_NOT_FOUND : TUNNEL_OUTCOME.SERVICE_BLOCKED;
+        throw hidden
+          ? new NotFoundException({ outcome, message: 'Service not found' })
+          : new ServiceUnavailableException({ outcome, message: 'Service traffic is blocked' });
       }
 
       if (!endpoint.service.agent || endpoint.service.agent.agent_connection !== 'linked' || endpoint.service.agent.agent_deleted_at) {
@@ -217,6 +252,7 @@ export class TunnelService {
         event: 'hub_tunnel_db_queries_completed',
         request_id: requestId,
         outcome,
+        blocked,
         route_cached: servedFromCache,
         query_count: queryCount,
         hub_db_query_ms: roundMilliseconds(workspaceQueryMs + endpointQueryMs),

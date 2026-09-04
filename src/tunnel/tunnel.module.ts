@@ -6,6 +6,7 @@ import { AgentModule } from 'src/agent/agent.module';
 @Module({
   imports: [AgentModule],
   controllers: [TunnelController],
-  providers: [TunnelService]
+  providers: [TunnelService],
+  exports: [TunnelService],
 })
 export class TunnelModule {}

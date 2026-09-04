@@ -23,6 +23,31 @@ export class AgentService implements OnModuleInit {
       where: { agent_deleted_at: null },
       data: { agent_status: 'offline', agent_last_online: new Date() },
     });
+    /*
+     * Hub가 막 떴다면 붙어 있는 Agent는 아직 없다. 서비스 상태는 Agent 보고로만
+     * 갱신되므로, 여기서 되돌리지 않으면 재시작 전에 running이던 서비스가 아무도
+     * 확인해 주지 않는 running인 채로 남는다.
+     */
+    await this.markServicesOffline({ agent_deleted_at: null });
+  }
+
+  /**
+   * Agent가 사라진 구간의 서비스를 offline으로 내린다.
+   *
+   * removed는 건드리지 않는다. 그건 Agent 연결과 무관하게 확정된 종착 상태라
+   * offline으로 덮으면 이미 지워진 서비스가 되살아난 것처럼 보인다.
+   * 나머지는 stopped였더라도 내린다. Agent가 없는 동안 Hub가 아는 것은
+   * '더 이상 확인할 수 없다'뿐이고, 재접속하면 Agent가 실제 상태를 다시 보고한다.
+   */
+  private async markServicesOffline(agentWhere: { agent_uuid?: string; agent_deleted_at?: null }) {
+    await this.prismaService.services.updateMany({
+      where: {
+        service_deleted_at: null,
+        service_status: { notIn: ['removed', 'offline'] },
+        agent: agentWhere,
+      },
+      data: { service_status: 'offline' },
+    });
   }
 
   async handleAcceptConnectRequest(agentCode: string, agentUuid: string) {
@@ -258,6 +283,22 @@ export class AgentService implements OnModuleInit {
         log(error);
       }
     }
+
+    /*
+     * 서비스는 Agent가 죽어도 running인 채로 남는다. 상태를 갱신하는 경로가 Agent
+     * 보고뿐이기 때문이다. 콘솔에는 '에이전트 오프라인, 서비스 정상'이라는 모순된
+     * 화면이 뜨고, 사용자는 서비스가 살아 있다고 믿는다. 여기서 같이 내린다.
+     *
+     * 실패해도 Agent 오프라인 표시까지 되돌리지는 않는다. 둘 중 하나라도 남는 편이
+     * 아무것도 안 바뀌는 것보다 낫고, 다음 재접속이 어차피 상태를 다시 맞춘다.
+     */
+    try {
+      await this.markServicesOffline({ agent_uuid: agentUuid });
+    } catch (error) {
+      log(`[Agent Service] Failed to mark services offline: ${agentUuid}`, 500, 'ERROR');
+      log(error);
+    }
+
     this.consoleGateway.notifyWorkspaceUpdated(agent?.agent_parent_workspace ?? null);
   }
 
