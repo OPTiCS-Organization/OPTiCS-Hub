@@ -41,7 +41,12 @@ model verification {
 model refresh_token {
   token_index      Int       @id @default(autoincrement())
   token_owner      Int
-  token            String
+  /*
+   * 기본값 VARCHAR(191)로는 모자란다. 세션 식별자(jti)를 넣기 전 토큰이 이미 175자였고,
+   * jti가 붙으면 235자쯤 된다. 좁은 채로 두면 조용히 잘려서, 잘린 문자열끼리 서로
+   * 일치해 버리는 최악의 형태로 실패한다.
+   */
+  token            String    @db.VarChar(512)
   token_created_at DateTime  @default(now())
   token_expired_at DateTime?
 

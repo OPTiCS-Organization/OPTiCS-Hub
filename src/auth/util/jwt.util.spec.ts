@@ -44,6 +44,12 @@ function fakePrisma(rows: Row[]) {
         Object.assign(row, data);
         return Promise.resolve(row);
       },
+      // revokeRefreshToken이 제시된 토큰만 골라 만료시킨다.
+      updateMany: ({ where, data }: any) => {
+        const targets = rows.filter(row => matches(row, where));
+        for (const row of targets) Object.assign(row, data);
+        return Promise.resolve({ count: targets.length });
+      },
       // signLoginTokens가 새로 발급한 Refresh Token을 저장한다.
       create: ({ data }: any) => {
         const row: Row = {
@@ -63,7 +69,13 @@ function makeUtil(rows: Row[], decoded: { userIndex: number } | null = { userInd
   const prisma = fakePrisma(rows);
   const jwtService = {
     decode: () => decoded,
-    signAsync: (payload: any) => Promise.resolve(`signed:${payload.purpose}`),
+    /*
+     * jti를 문자열에 섞어야 한다. 실제 서명은 payload가 같으면 같은 문자열을 내놓고,
+     * 그게 바로 이 파일 아래쪽에서 고정하려는 버그였다. 대역이 매번 다른 값을 주면
+     * 테스트는 통과하지만 아무것도 지키지 못한다.
+     */
+    signAsync: (payload: any, options?: any) =>
+      Promise.resolve(`signed:${payload.purpose}:${options?.jwtid ?? 'no-jti'}`),
   };
   const configService = { get: () => '5m', getOrThrow: () => '5m' };
 
@@ -74,6 +86,52 @@ function makeUtil(rows: Row[], decoded: { userIndex: number } | null = { userInd
 function activeRow(): Row {
   return { token_index: 1, token_owner: USER_INDEX, token: TOKEN, token_expired_at: null };
 }
+
+/*
+ * 기기 여러 대에서 동시에 로그인 상태가 유지되는지.
+ *
+ * 예전에는 Refresh Token payload가 {purpose, userIndex, iat, exp}뿐이라, 같은 사용자가
+ * 같은 초에 로그인하면 서명까지 똑같은 문자열이 나왔다. 두 기기가 한 문자열을 공유하니
+ * DB에서 세션을 가를 수가 없고, 한쪽에서 로그아웃하면 token 값으로 도는 updateMany가
+ * 다른 기기의 행까지 함께 만료시켰다.
+ */
+describe('JwtUtil 다중 기기 세션', () => {
+  it('같은 사용자가 두 번 로그인하면 서로 다른 Refresh Token을 받는다', async () => {
+    const { util } = makeUtil([]);
+
+    const first = await util.signLoginTokens(USER_INDEX);
+    const second = await util.signLoginTokens(USER_INDEX);
+
+    expect(first.refreshToken).not.toBe(second.refreshToken);
+  });
+
+  it('한 기기에서 로그아웃해도 다른 기기의 세션은 남는다', async () => {
+    const { util, prisma } = makeUtil([]);
+
+    const phone = await util.signLoginTokens(USER_INDEX);
+    const laptop = await util.signLoginTokens(USER_INDEX);
+
+    await util.revokeRefreshToken(phone.refreshToken);
+
+    const phoneRow = prisma.rows.find(row => row.token === phone.refreshToken)!;
+    const laptopRow = prisma.rows.find(row => row.token === laptop.refreshToken)!;
+    expect(phoneRow.token_expired_at).toBeInstanceOf(Date);
+    expect(laptopRow.token_expired_at).toBeNull();
+  });
+
+  it('한 기기가 토큰을 회전해도 다른 기기의 세션은 살아 있다', async () => {
+    const { util, prisma } = makeUtil([]);
+
+    const phone = await util.signLoginTokens(USER_INDEX);
+    const laptop = await util.signLoginTokens(USER_INDEX);
+
+    const rotated = await util.refresh(phone.refreshToken);
+
+    expect(rotated.refreshToken).not.toBeNull();
+    const laptopRow = prisma.rows.find(row => row.token === laptop.refreshToken)!;
+    expect(laptopRow.token_expired_at).toBeNull();
+  });
+});
 
 describe('JwtUtil.refresh', () => {
   it('살아 있는 토큰이면 새 쌍을 발급한다', async () => {
