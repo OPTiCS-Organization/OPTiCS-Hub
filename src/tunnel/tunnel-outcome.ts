@@ -19,6 +19,8 @@ export const TUNNEL_OUTCOME = {
   WORKSPACE_NOT_FOUND: 'workspace_not_found',
   /** 워크스페이스는 있으나 그 주소에 게시된 서비스가 없음 */
   SERVICE_NOT_FOUND: 'service_not_found',
+  /** 운영자가 이 서비스의 트래픽을 끊어 둠 */
+  SERVICE_BLOCKED: 'service_blocked',
   /** 서비스는 있으나 연결된 배포 에이전트가 없음(미연결/삭제됨) */
   AGENT_NOT_FOUND: 'agent_not_found',
   /** 에이전트 WS 제어 채널이 끊겨 연결 명령을 보낼 수조차 없음 */

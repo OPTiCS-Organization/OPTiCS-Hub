@@ -6,6 +6,7 @@ import { Code } from 'src/global/Code.enum';
 import { RedeployService } from '../dto/RedeployService.dto';
 import { UpdateServiceSubdomain } from '../dto/UpdateServiceSubdomain.dto';
 import { UpdateServiceEndpoints } from '../dto/UpdateServiceEndpoints.dto';
+import { BlockServiceTraffic } from '../dto/BlockServiceTraffic.dto';
 import { AgentNotConnectedException } from 'src/global/exception/AgentNotConnected.exception';
 
 @Controller({ path: 'service', version: '1' })
@@ -87,6 +88,30 @@ export class ServiceController {
       },
       message: 'Server Stop Command Sent.'
     }
+    return response;
+  }
+
+  @Post(':serviceIdx/traffic/block')
+  @UseGuards(JwtGuard)
+  async handleBlockServiceTraffic(@Request() request: any, @Param('serviceIdx') param: string, @Body() body: BlockServiceTraffic) {
+    const data = await this.serviceService.handleBlockServiceTraffic(request.user.userIndex, param, body ?? {});
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Service Traffic Blocked.',
+    };
+    return response;
+  }
+
+  @Post(':serviceIdx/traffic/unblock')
+  @UseGuards(JwtGuard)
+  async handleUnblockServiceTraffic(@Request() request: any, @Param('serviceIdx') param: string) {
+    const data = await this.serviceService.handleUnblockServiceTraffic(request.user.userIndex, param);
+    const response: GlobalResponse = {
+      code: Code.Common.SUCCESS,
+      data: { service: data },
+      message: 'Service Traffic Unblocked.',
+    };
     return response;
   }
 

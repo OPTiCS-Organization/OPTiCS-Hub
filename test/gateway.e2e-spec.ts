@@ -161,9 +161,10 @@ describe('Hub가 알려준 outcome을 그대로 반영한다', () => {
   it.each([
     [TUNNEL_OUTCOME.WORKSPACE_NOT_FOUND, 404, 'HTTP/1.1 404 Requested Service Not Found'],
     [TUNNEL_OUTCOME.SERVICE_NOT_FOUND, 404, 'HTTP/1.1 404 Requested Service Not Found'],
-    [TUNNEL_OUTCOME.AGENT_NOT_FOUND, 404, 'HTTP/1.1 502 Bad Gateway'],
-    [TUNNEL_OUTCOME.AGENT_OFFLINE, 503, 'HTTP/1.1 502 Bad Gateway'],
-    [TUNNEL_OUTCOME.DB_ERROR, 500, 'HTTP/1.1 502 Bad Gateway'],
+    [TUNNEL_OUTCOME.SERVICE_BLOCKED, 503, 'HTTP/1.1 503 Service Unavailable'],
+    [TUNNEL_OUTCOME.AGENT_NOT_FOUND, 404, 'HTTP/1.1 503 Service Unavailable'],
+    [TUNNEL_OUTCOME.AGENT_OFFLINE, 503, 'HTTP/1.1 503 Service Unavailable'],
+    [TUNNEL_OUTCOME.DB_ERROR, 500, 'HTTP/1.1 503 Service Unavailable'],
   ])('%s는 %d로 와도 outcome을 보고 페이지를 고른다', async (outcome, hubStatus, expectedStatusLine) => {
     hubReply = { status: hubStatus, body: { outcome } };
 
@@ -171,6 +172,30 @@ describe('Hub가 알려준 outcome을 그대로 반영한다', () => {
 
     expect(statusLine).toBe(expectedStatusLine);
     expect(body).toContain(outcome);
+  });
+
+  /*
+   * hidden 모드로 차단한 서비스는 Hub가 outcome을 service_not_found로 바꿔 보낸다.
+   * 그래서 게이트웨이에는 차단이라는 개념이 없고, 없는 서비스와 글자 하나까지 같아야 한다.
+   * 여기서 확인하는 것은 게이트웨이가 그 위장을 깨뜨리지 않는다는 것이다.
+   */
+  it('hidden으로 가려진 차단은 없는 서비스와 구별되지 않는다', async () => {
+    hubReply = { status: 404, body: { outcome: TUNNEL_OUTCOME.SERVICE_NOT_FOUND } };
+    const hiddenBlock = parse(await get('api.demo.optics.run'));
+
+    expect(hiddenBlock.statusLine).toBe('HTTP/1.1 404 Requested Service Not Found');
+    expect(hiddenBlock.body).not.toContain('suspended');
+    expect(hiddenBlock.body).not.toContain(TUNNEL_OUTCOME.SERVICE_BLOCKED);
+  });
+
+  it('notice로 차단한 서비스는 운영자가 끊었다고 알려준다', async () => {
+    hubReply = { status: 503, body: { outcome: TUNNEL_OUTCOME.SERVICE_BLOCKED } };
+
+    const { statusLine, body } = parse(await get('api.demo.optics.run'));
+
+    expect(statusLine).toBe('HTTP/1.1 503 Service Unavailable');
+    expect(body).toContain('suspended by an operator');
+    expect(body).toContain(TUNNEL_OUTCOME.SERVICE_BLOCKED);
   });
 
   it('상태 코드가 같아도 원인이 다르면 다른 문구를 보여준다', async () => {
@@ -200,7 +225,7 @@ describe('Hub 응답을 믿을 수 없을 때의 폴백', () => {
 
     const { statusLine, body } = parse(await get('api.demo.optics.run'));
 
-    expect(statusLine).toBe('HTTP/1.1 502 Bad Gateway');
+    expect(statusLine).toBe('HTTP/1.1 503 Service Unavailable');
     expect(body).toContain(TUNNEL_OUTCOME.HUB_REJECTED);
   });
 
@@ -209,7 +234,7 @@ describe('Hub 응답을 믿을 수 없을 때의 폴백', () => {
 
     const { statusLine, body } = parse(await get('api.demo.optics.run'));
 
-    expect(statusLine).toBe('HTTP/1.1 502 Bad Gateway');
+    expect(statusLine).toBe('HTTP/1.1 503 Service Unavailable');
     expect(body).toContain(TUNNEL_OUTCOME.HUB_REJECTED);
   });
 
@@ -230,7 +255,7 @@ describe('Hub 응답을 믿을 수 없을 때의 폴백', () => {
     try {
       const { statusLine, body } = parse(await get('api.demo.optics.run'));
 
-      expect(statusLine).toBe('HTTP/1.1 502 Bad Gateway');
+      expect(statusLine).toBe('HTTP/1.1 503 Service Unavailable');
       expect(body).toContain(TUNNEL_OUTCOME.HUB_UNREACHABLE);
       expect(body).toContain('could not reach the OPTiCS control plane');
     } finally {
@@ -246,7 +271,7 @@ describe('에이전트가 터널을 열지 않을 때', () => {
 
     const { statusLine, body } = parse(await get('api.demo.optics.run'));
 
-    expect(statusLine).toBe('HTTP/1.1 502 Bad Gateway');
+    expect(statusLine).toBe('HTTP/1.1 503 Service Unavailable');
     expect(body).toContain(TUNNEL_OUTCOME.AGENT_NO_TUNNEL);
     expect(body).toContain('did not do so in time');
   }, 20_000);

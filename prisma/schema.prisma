@@ -41,7 +41,12 @@ model verification {
 model refresh_token {
   token_index      Int       @id @default(autoincrement())
   token_owner      Int
-  token            String
+  /*
+   * 기본값 VARCHAR(191)로는 모자란다. 세션 식별자(jti)를 넣기 전 토큰이 이미 175자였고,
+   * jti가 붙으면 235자쯤 된다. 좁은 채로 두면 조용히 잘려서, 잘린 문자열끼리 서로
+   * 일치해 버리는 최악의 형태로 실패한다.
+   */
+  token            String    @db.VarChar(512)
   token_created_at DateTime  @default(now())
   token_expired_at DateTime?
 
@@ -106,6 +111,16 @@ model services {
   service_parent_workspace Int
   service_parent_agent     Int
   service_status           ServiceStatus        @default(waiting)
+  /// 운영자가 이 서비스로 가는 트래픽을 끊은 시각. null이면 정상 통과.
+  ///
+  /// service_status와 칸을 나눈 이유는 소유자가 다르기 때문이다. 상태는 컨테이너
+  /// 수명주기이고 Agent 보고(updateServiceStatus)가 계속 덮어쓴다. 차단을 거기
+  /// 얹으면 재배포 한 번이나 상태 보고 한 번에 차단이 조용히 풀린다.
+  /// agent_releases가 release_blocked와 release_manual_block을 나눠 둔 것과 같은 이유다.
+  service_traffic_blocked_at   DateTime?
+  /// 차단 사유. 운영 기록용이며 공개 오류 페이지에는 싣지 않는다.
+  service_traffic_block_reason String?              @db.Text
+  service_traffic_block_mode   TrafficBlockMode     @default(notice)
   service_version          String
   service_deploy_preset    DeployPreset         @default(dockerfile)
   service_created_at       DateTime             @default(now())
@@ -230,8 +245,23 @@ enum ServiceStatus {
   starting
   running
   stopped
+  /// Agent 연결이 끊겨 상태를 확인할 수 없는 구간.
+  ///
+  /// stopped(사용자가 직접 멈춤)와 구별해야 한다. 컨테이너는 아직 돌고 있을 수도 있고
+  /// 죽었을 수도 있다. Hub가 아는 것은 '더 이상 알 수 없다'는 사실뿐이다.
+  /// Agent가 재접속하면 컨테이너 상태를 다시 보고하므로 저절로 복구된다.
+  offline
   failed
   removed
+}
+
+/// 트래픽이 차단된 주소로 요청이 왔을 때 무엇을 보여줄지.
+enum TrafficBlockMode {
+  /// 503과 함께 '운영자가 트래픽을 중단했다'는 안내 페이지를 보여준다.
+  notice
+  /// 404를 돌려주어 서비스의 존재 자체를 숨긴다. 남용 대응처럼 존재를 알리고
+  /// 싶지 않을 때 쓴다.
+  hidden
 }
 
 enum ServiceComponentStatus {

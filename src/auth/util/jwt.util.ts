@@ -127,10 +127,24 @@ export class JwtUtil {
       expiresIn: this.getTokenTtl(TokenPurpose.ACCESS),
     });
 
+    /*
+     * jti가 이 토큰을 세션 하나로 만든다.
+     *
+     * 전에는 payload가 {purpose, userIndex, iat, exp}뿐이라, 같은 사용자가 같은 초에
+     * 로그인하면 서명까지 똑같은 문자열이 나왔다. 두 기기가 한 문자열을 공유하면
+     * DB에서 세션을 가를 방법이 없고, revokeRefreshToken이 token 값으로 updateMany를
+     * 하므로 한쪽에서 로그아웃하는 순간 다른 기기까지 함께 끊겼다.
+     *
+     * 랜덤 값이 하나 들어가면 발급 시각과 무관하게 토큰이 갈리고, 조회·폐기·회전이
+     * 전부 제시된 그 세션에만 닿는다. 기기 수 제한은 원래 없었고, 이걸로 실제로 없어진다.
+     *
+     * Access Token에는 넣지 않는다. 저장하지 않는 토큰이라 구별할 이유가 없다.
+     */
     const refreshToken = await this.jwtService.signAsync({
       purpose: TokenPurpose.REFRESH,
       userIndex,
     }, {
+      jwtid: crypto.randomUUID(),
       expiresIn: this.getTokenTtl(TokenPurpose.REFRESH),
     });
 

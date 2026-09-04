@@ -27,7 +27,7 @@ function readTemplate(name: ErrorTemplateName) {
 
 const TEMPLATES: Record<ErrorTemplateName, string> = {
   RequestedServiceNotFound: readTemplate('RequestedServiceNotFound'),
-  BadGateway: readTemplate('BadGateway'),
+  ServiceUnavailable: readTemplate('ServiceUnavailable'),
 };
 
 // Host 헤더 등 외부 입력이 그대로 들어오므로 치환 값은 반드시 이스케이프한다.
