@@ -30,12 +30,15 @@ export class PrismaService
        * acquireTimeout(기본 10초)만 기다리다 'pool timeout'으로 죽는다. 재시작 전까지
        * 스스로 낫지 않는 이유가 이것이다.
        *
-       * socketTimeout이 무응답 소켓을 끊어 커넥션을 pool로 되돌리고, queryTimeout이
-       * 개별 쿼리가 무한정 매달리는 것을 막는다. 둘 다 acquireTimeout보다 넉넉히 크게
-       * 잡아, 정상적으로 느린 쿼리가 타임아웃으로 오인되지 않게 한다.
+       * socketTimeout이 무응답 소켓을 끊어 커넥션을 pool로 되돌린다. acquireTimeout보다
+       * 넉넉히 크게 잡아, 정상적으로 느린 쿼리가 타임아웃으로 오인되지 않게 한다.
+       *
+       * queryTimeout은 여기 쓰지 않는다. 이 옵션은 MariaDB 10.1.1+ 의 SET STATEMENT
+       * max_statement_time 구문에 의존하는데, 이 프로젝트의 DB는 MySQL 8이라 지원되지
+       * 않는다. 설정하면 커넥션을 맺을 때마다 검증 쿼리가 실패해서(no: 45038) pool이
+       * 아예 채워지지 못하고 active=0 idle=0 인 채로 모든 쿼리가 죽는다.
        */
       socketTimeout: 60000,
-      queryTimeout: 30000,
 
       /**
        * 커넥션이 30초 넘게 반납되지 않으면 경고 로그를 남긴다. 반납을 강제하지는 않고
