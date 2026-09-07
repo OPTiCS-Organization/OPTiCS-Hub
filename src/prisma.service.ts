@@ -21,9 +21,9 @@ export class PrismaService
       ssl: { rejectUnauthorized: false },
 
       /**
-       * 아래 세 옵션이 없으면 pool이 한 번 고갈된 뒤 영구히 복구되지 않는다.
+       * socketTimeout이 없으면 pool이 한 번 고갈된 뒤 영구히 복구되지 않는다.
        *
-       * 드라이버 기본값은 queryTimeout=0, socketTimeout=0 즉 '무한 대기'다. 커넥션이
+       * 드라이버 기본값은 socketTimeout=0, 즉 '무한 대기'다. 커넥션이
        * DB로 쿼리를 보낸 뒤 응답이 영영 오지 않으면(네트워크 단절, DB 재시작, 방화벽이
        * 유휴 TCP를 조용히 끊는 경우) 그 커넥션은 active 상태로 pool에 붙잡힌 채 절대
        * 반납되지 않는다. 이게 10번 쌓이면 active=10 idle=0 이 되고, 이후 모든 쿼리는
@@ -42,7 +42,7 @@ export class PrismaService
 
       /**
        * 커넥션이 30초 넘게 반납되지 않으면 경고 로그를 남긴다. 반납을 강제하지는 않고
-       * 진단만 해준다 — 위 두 타임아웃이 실제 회수를 담당하고, 이 옵션은 만약 애플리케이션
+       * 진단만 해준다 — 실제 회수는 위 socketTimeout이 담당하고, 이 옵션은 만약 애플리케이션
        * 코드 쪽에 누수가 생겼을 때 그 사실을 조용히 묻히지 않게 드러내는 역할이다.
        * 켜두면 pool 관련 에러 메시지에 leak= 카운터도 함께 찍힌다.
        */

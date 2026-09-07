@@ -10,6 +10,12 @@ import { ServiceComponentStatus } from '@prisma/client';
 import { ReplayGuard, sign, verify } from 'src/global/hash.util';
 import { PROTOCOL_RESULT_CODE } from './types/ResultCode.type';
 
+/**
+ * 권한 조회 캐시 수명. 서비스의 소속 워크스페이스는 사실상 불변이라 길게 잡아도 되지만,
+ * 서비스 삭제나 agent unlink가 반영되기까지의 지연이 곧 이 값이므로 짧게 유지한다.
+ */
+const WORKSPACE_INDEX_CACHE_TTL_MS = 30_000;
+
 const MINIMUM_PROTOCOL_VERSION = 1;
 const MAXIMUM_PROTOCOL_VERSION = 1;
 
@@ -35,6 +41,18 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private readonly agentUuidToSocketId = new Map<string, string>();
   private readonly offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * (agentUuid, serviceIndex) -> workspaceIndex 권한 조회 캐시.
+   *
+   * service-log 같은 이벤트는 컨테이너 로그 한 줄마다 날아온다. 캐시가 없으면 그 한 줄마다
+   * getWorkspaceIndexForAgentService가 DB 왕복을 2번씩 하고, 초당 수백 줄이 쏟아지는
+   * 배포 중에는 그것만으로 connectionLimit(10)을 다 먹어 'pool timeout'이 난다.
+   *
+   * 부정 결과(null)는 담지 않는다. 서비스가 이제 막 생성됐거나 agent가 link되는 중이라
+   * 잠깐 못 찾은 것일 수 있고, 그걸 캐시하면 정상화된 뒤에도 TTL 동안 로그가 끊긴다.
+   * TunnelService.routeCache가 성공한 경로만 담는 것과 같은 이유다.
+   */
+  private readonly workspaceIndexCache = new Map<string, { workspaceIndex: number; expiresAt: number }>();
   constructor(
     private readonly agentService: AgentService,
     private readonly prismaService: PrismaService,
@@ -45,6 +63,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) { }
 
   private async getWorkspaceIndexForAgentService(agentUuid: string, serviceIndex: number): Promise<number | null> {
+    const cacheKey = `${agentUuid}/${serviceIndex}`;
+    const cached = this.workspaceIndexCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.workspaceIndex;
+
     const service = await this.prismaService.services.findFirst({
       where: { service_index: serviceIndex, service_deleted_at: null },
       select: { service_parent_agent: true, service_parent_workspace: true },
@@ -62,6 +84,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
     if (!agent) return null;
 
+    this.workspaceIndexCache.set(cacheKey, {
+      workspaceIndex: service.service_parent_workspace,
+      expiresAt: Date.now() + WORKSPACE_INDEX_CACHE_TTL_MS,
+    });
     return service.service_parent_workspace;
   }
 
@@ -404,6 +430,10 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (this.agentUuidToSocketId.get(agentUuid) !== client.id) return;
       this.consoleGateway.closeAgentConnections(agentUuid);
       this.agentUuidToSocketId.delete(agentUuid);
+      /* 끊긴 agent의 캐시 항목은 남겨둬야 할 이유가 없다. 안 지우면 Map이 계속 자란다. */
+      for (const key of this.workspaceIndexCache.keys()) {
+        if (key.startsWith(`${agentUuid}/`)) this.workspaceIndexCache.delete(key);
+      }
       // 업데이트로 인한 재시작은 오프라인이 아니다. 매번 오프라인으로 깜빡이면 사고처럼 보인다.
       if (await this.agentUpdateService.isExpectedRestart(agentUuid)) return;
       this.scheduleOffline(agentUuid);
